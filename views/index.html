@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatWave - Connect Instantly</title>
+  <link rel="stylesheet" href="/css/auth.css">
+</head>
+<body>
+  <div class="container">
+    <div class="auth-card">
+      <div class="logo">
+        <div class="logo-icon">CW</div>
+        <h1>ChatWave</h1>
+        <p class="tagline">Connect with anyone using their unique Chat Number</p>
+      </div>
+
+      <!-- Login Form -->
+      <form id="loginForm" class="auth-form active">
+        <h2>Welcome Back</h2>
+        <div class="input-group">
+          <input type="text" id="loginInput" placeholder="Username, email, or chat number" required>
+        </div>
+        <div class="input-group">
+          <input type="password" id="loginPassword" placeholder="Password" required>
+        </div>
+        <button type="submit" class="btn-primary">Log In</button>
+        <p class="switch-text">Don't have an account? <a href="#" id="showRegister">Sign Up</a></p>
+      </form>
+
+      <!-- Register Form -->
+      <form id="registerForm" class="auth-form">
+        <h2>Create Account</h2>
+        <div class="input-group">
+          <input type="text" id="regUsername" placeholder="Username" required>
+        </div>
+        <div class="input-group">
+          <input type="email" id="regEmail" placeholder="Email address" required>
+        </div>
+        <div class="input-group">
+          <input type="password" id="regPassword" placeholder="Password (min 6 chars)" required minlength="6">
+        </div>
+        <button type="submit" class="btn-primary">Create Account</button>
+        <p class="switch-text">Already have an account? <a href="#" id="showLogin">Log In</a></p>
+      </form>
+
+      <div id="errorMsg" class="error-msg"></div>
+    </div>
+  </div>
+
+  <script src="/js/auth.js"></script>
+</body>
+</html>

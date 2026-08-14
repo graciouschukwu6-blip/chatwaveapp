@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatWave</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="user-info" id="userProfileBtn">
+          <div class="user-avatar" id="myAvatar">U</div>
+          <div class="user-details">
+            <span class="user-name" id="myUsername">User</span>
+            <span class="user-chat-num" id="myChatNumber">#00000000</span>
+          </div>
+        </div>
+        <div class="sidebar-actions">
+          <button class="icon-btn" id="searchMsgsBtn" title="Search Messages">&#128269;</button>
+          <button class="icon-btn" id="newChatBtn" title="New Chat">+</button>
+          <button class="icon-btn" id="logoutBtn" title="Logout">&#10005;</button>
+        </div>
+      </div>
+
+      <div class="search-bar">
+        <input type="text" id="searchConversations" placeholder="Search conversations...">
+      </div>
+
+      <div class="conversations-list" id="conversationsList"></div>
+    </aside>
+
+    <!-- Chat Area -->
+    <main class="chat-area" id="chatArea">
+      <!-- Empty state -->
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">CW</div>
+        <h2>Welcome to ChatWave</h2>
+        <p>Start a conversation using someone's Chat Number</p>
+        <button class="btn-primary" id="startChatBtn">Start a Chat</button>
+      </div>
+
+      <!-- Active chat -->
+      <div class="active-chat" id="activeChat" style="display:none;">
+        <div class="chat-header">
+          <button class="back-btn" id="backBtn">&#8592;</button>
+          <div class="chat-user-info">
+            <div class="chat-avatar" id="chatAvatar">U</div>
+            <div>
+              <span class="chat-name" id="chatName">User</span>
+              <span class="chat-status" id="chatStatus">offline</span>
+            </div>
+          </div>
+          <div class="chat-header-actions">
+            <button class="icon-btn" id="pinnedBtn" title="Pinned Messages">&#128204;</button>
+            <button class="icon-btn" id="chatInfoBtn" title="Info">i</button>
+          </div>
+        </div>
+
+        <!-- Pinned messages bar -->
+        <div class="pinned-bar" id="pinnedBar" style="display:none;">
+          <span class="pin-icon">&#128204;</span>
+          <span class="pinned-text" id="pinnedText">Pinned message</span>
+          <button class="pin-close" id="pinnedBarClose">&#10005;</button>
+        </div>
+
+        <!-- Reply preview -->
+        <div class="reply-preview" id="replyPreview" style="display:none;">
+          <div class="reply-preview-content">
+            <span class="reply-to-name" id="replyToName">User</span>
+            <span class="reply-to-text" id="replyToText">Message</span>
+          </div>
+          <button class="reply-cancel" id="replyCancelBtn">&#10005;</button>
+        </div>
+
+        <div class="messages-container" id="messagesContainer"></div>
+
+        <div class="typing-indicator" id="typingIndicator" style="display:none;">
+          <span id="typingUser">Someone</span> is typing...
+        </div>
+
+        <div class="message-input-area">
+          <button class="icon-btn attach-btn" id="attachBtn" title="Attach file">&#128206;</button>
+          <button class="icon-btn voice-btn" id="voiceBtn" title="Voice note">&#127908;</button>
+          <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off">
+          <button class="send-btn" id="sendBtn" title="Send">&#9654;</button>
+          <input type="file" id="fileInput" style="display:none;">
+        </div>
+
+        <!-- Voice recording UI -->
+        <div class="voice-recording" id="voiceRecording" style="display:none;">
+          <div class="recording-indicator">
+            <span class="rec-dot"></span>
+            <span id="recordingTime">0:00</span>
+          </div>
+          <button class="icon-btn" id="cancelRecording" title="Cancel">&#128465;</button>
+          <button class="send-btn" id="sendRecording" title="Send">&#9654;</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- New Chat Modal -->
+  <div class="modal" id="newChatModal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>New Conversation</h3>
+        <button class="close-modal" id="closeNewChat">&#10005;</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="private">Direct Message</button>
+        <button class="tab-btn" data-tab="group">Group Chat</button>
+      </div>
+      <div class="tab-content active" id="privateTab">
+        <div class="input-group">
+          <label>Enter Chat Number</label>
+          <input type="text" id="privateChatNumber" placeholder="e.g. 12345678">
+        </div>
+        <div id="userSearchResult" class="user-search-result"></div>
+        <button class="btn-primary" id="startPrivateChat">Start Chat</button>
+      </div>
+      <div class="tab-content" id="groupTab" style="display:none;">
+        <div class="input-group">
+          <label>Group Name</label>
+          <input type="text" id="groupName" placeholder="Enter group name">
+        </div>
+        <div class="input-group">
+          <label>Add Members (Chat Numbers, comma-separated)</label>
+          <input type="text" id="groupMembers" placeholder="e.g. 12345678, 87654321">
+        </div>
+        <button class="btn-primary" id="createGroupChat">Create Group</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search Messages Modal -->
+  <div class="modal" id="searchModal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Search Messages</h3>
+        <button class="close-modal" id="closeSearch">&#10005;</button>
+      </div>
+      <div class="input-group">
+        <input type="text" id="msgSearchInput" placeholder="Search messages...">
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+
+  <!-- Profile Modal -->
+  <div class="modal" id="profileModal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Your Profile</h3>
+        <button class="close-modal" id="closeProfile">&#10005;</button>
+      </div>
+      <div class="profile-body">
+        <div class="profile-avatar-section">
+          <div class="profile-avatar" id="profileAvatar">U</div>
+          <label class="avatar-upload-btn" for="avatarInput">Change Photo</label>
+          <input type="file" id="avatarInput" accept="image/*" style="display:none;">
+        </div>
+        <div class="profile-info">
+          <div class="profile-field"><label>Username</label><span id="profileUsername">-</span></div>
+          <div class="profile-field"><label>Email</label><span id="profileEmail">-</span></div>
+          <div class="profile-field"><label>Chat Number</label><span id="profileChatNum" class="chat-num-display">-</span></div>
+        </div>
+        <div class="profile-section">
+          <h4>Blocked Users</h4>
+          <div id="blockedList" class="blocked-list"></div>
+          <div class="input-group" style="margin-top:12px;">
+            <input type="text" id="blockInput" placeholder="Chat number to block">
+          </div>
+          <button class="btn-danger" id="blockUserBtn">Block User</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pinned Messages Panel -->
+  <div class="info-panel" id="pinnedPanel" style="display:none;">
+    <div class="info-header">
+      <h3>Pinned Messages</h3>
+      <button class="close-modal" id="closePinned">&#10005;</button>
+    </div>
+    <div class="info-body" id="pinnedBody"></div>
+  </div>
+
+  <!-- Chat Info Panel -->
+  <div class="info-panel" id="infoPanel" style="display:none;">
+    <div class="info-header">
+      <h3>Chat Info</h3>
+      <button class="close-modal" id="closeInfo">&#10005;</button>
+    </div>
+    <div class="info-body" id="infoBody"></div>
+  </div>
+
+  <!-- Context Menu (right-click on messages) -->
+  <div class="context-menu" id="contextMenu" style="display:none;">
+    <button class="ctx-btn" data-action="reply">&#8617; Reply</button>
+    <button class="ctx-btn" data-action="react">&#128522; React</button>
+    <button class="ctx-btn" data-action="pin">&#128204; Pin</button>
+    <button class="ctx-btn" data-action="delete">&#128465; Delete</button>
+  </div>
+
+  <!-- Emoji Picker -->
+  <div class="emoji-picker" id="emojiPicker" style="display:none;">
+    <div class="emoji-grid" id="emojiGrid"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
