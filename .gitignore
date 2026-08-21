@@ -1,0 +1,9 @@
+node_modules/
+.env
+chatplatform.db
+public/uploads/avatars/*
+public/uploads/voice/*
+public/uploads/groups/*
+!public/uploads/avatars/.gitkeep
+!public/uploads/voice/.gitkeep
+!public/uploads/groups/.gitkeep

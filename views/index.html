@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatWave - Connect Instantly</title>
+  <link rel="stylesheet" href="/css/auth.css">
+</head>
+<body>
+  <div class="bg-animation">
+    <div class="gradient-orb orb-1"></div>
+    <div class="gradient-orb orb-2"></div>
+    <div class="gradient-orb orb-3"></div>
+  </div>
+
+  <div class="container">
+    <div class="auth-card">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+            <path d="M20 4C11.16 4 4 10.16 4 17.5C4 21.5 5.88 25.08 8.88 27.58L7 35L14.8 31.8C16.44 32.24 18.18 32.5 20 32.5C28.84 32.5 36 26.34 36 19C36 11.66 28.84 4 20 4Z" fill="url(#grad1)"/>
+            <defs><linearGradient id="grad1" x1="4" y1="4" x2="36" y2="35"><stop stop-color="#667eea"/><stop offset="1" stop-color="#764ba2"/></linearGradient></defs>
+          </svg>
+        </div>
+        <h1>ChatWave</h1>
+        <p class="tagline">Connect with anyone using their unique Chat Number</p>
+      </div>
+
+      <form id="loginForm" class="auth-form active">
+        <h2>Welcome Back</h2>
+        <div class="input-group">
+          <label>Username, email, or chat number</label>
+          <input type="text" id="loginInput" placeholder="Enter your credentials" required>
+        </div>
+        <div class="input-group">
+          <label>Secret Key</label>
+          <input type="text" id="loginSecret" placeholder="Enter your secret key" required style="-webkit-text-security:disc;text-security:disc;">
+        </div>
+        <button type="submit" class="btn-primary">
+          <span>Sign In</span>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/></svg>
+        </button>
+        <p class="switch-text">Don&#39;t have an account? <a href="#" id="showRegister">Sign Up</a></p>
+      </form>
+
+      <form id="registerForm" class="auth-form">
+        <h2>Create Account</h2>
+        <div class="input-group">
+          <label>Username</label>
+          <input type="text" id="regUsername" placeholder="Choose a username" required>
+        </div>
+        <div class="input-group">
+          <label>Email</label>
+          <input type="email" id="regEmail" placeholder="your@email.com" required>
+        </div>
+        <div class="input-group">
+          <label>Secret Key</label>
+          <input type="text" id="regSecret" placeholder="Min 6 characters" required minlength="6" style="-webkit-text-security:disc;text-security:disc;">
+        </div>
+        <button type="submit" class="btn-primary">
+          <span>Create Account</span>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/></svg>
+        </button>
+        <p class="switch-text">Already have an account? <a href="#" id="showLogin">Sign In</a></p>
+      </form>
+
+      <div id="errorMsg" class="error-msg"></div>
+    </div>
+
+    <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+      <svg class="sun-icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/></svg>
+      <svg class="moon-icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>
+    </button>
+  </div>
+
+  <script src="/js/auth.js"></script>
+</body>
+</html>
