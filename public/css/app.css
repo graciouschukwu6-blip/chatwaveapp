@@ -418,6 +418,7 @@ body {
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
 }
 
 .message-input-area input {

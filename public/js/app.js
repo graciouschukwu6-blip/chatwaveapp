@@ -1607,6 +1607,7 @@ function showCurrentStatus() {
 
   // Content
   var contentEl = document.getElementById('statusViewerContent');
+  stopStatusMedia();
   var captionHtml = '';
   if (s.type === 'text') {
     var bg = s.bg_gradient || STATUS_GRADIENTS[0];
@@ -1665,9 +1666,18 @@ function prevStatus() {
 
 function closeStatusViewer() {
   clearTimeout(statusTimer);
+  stopStatusMedia();
   document.getElementById('statusViewer').style.display = 'none';
   document.getElementById('statusViewersPanel').style.display = 'none';
   loadStatusFeed();
+}
+
+function stopStatusMedia() {
+  var contentEl = document.getElementById('statusViewerContent');
+  var videos = contentEl.querySelectorAll('video');
+  var audios = contentEl.querySelectorAll('audio');
+  videos.forEach(function(v) { v.pause(); v.src = ''; v.load(); });
+  audios.forEach(function(a) { a.pause(); a.src = ''; a.load(); });
 }
 
 document.getElementById('statusNavRight').addEventListener('click', nextStatus);
