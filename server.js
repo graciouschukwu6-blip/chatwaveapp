@@ -17,7 +17,8 @@ const uploadDirs = [
   path.join(__dirname, 'public/uploads'),
   path.join(__dirname, 'public/uploads/avatars'),
   path.join(__dirname, 'public/uploads/voice'),
-  path.join(__dirname, 'public/uploads/groups')
+  path.join(__dirname, 'public/uploads/groups'),
+  path.join(__dirname, 'public/uploads/status')
 ];
 uploadDirs.forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -36,6 +37,7 @@ setupSocket(io);
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/chat', require('./routes/chat'));
+app.use('/api/status', require('./routes/status'));
 
 // Serve the app
 app.get('/', (req, res) => {

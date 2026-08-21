@@ -28,7 +28,26 @@ function setupSocket(io) {
       if (!member) return;
 
       // Check if blocked (for private convos)
-      const conv = db.prepare('SELECT type FROM conversations WHERE id = ?').get(conversation_id);
+      const conv = db.prepare('SELECT type, locked FROM conversations WHERE id = ?').get(conversation_id);
+
+      // Check if group is locked
+      if (conv && conv.type === 'group' && conv.locked === 1) {
+        const memberRole = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(conversation_id, user.id);
+        if (!memberRole || memberRole.role !== 'admin') {
+          socket.emit('error_message', { error: 'This group is locked. Only admins can send messages.' });
+          return;
+        }
+      }
+
+      // Check @everyone permission
+      if (content && content.includes('@everyone')) {
+        const memberRole = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(conversation_id, user.id);
+        if (!memberRole || memberRole.role !== 'admin') {
+          socket.emit('error_message', { error: 'Only admins can use @everyone' });
+          return;
+        }
+      }
+
       if (conv && conv.type === 'private') {
         const otherMember = db.prepare(
           'SELECT user_id FROM conversation_members WHERE conversation_id = ? AND user_id != ?'

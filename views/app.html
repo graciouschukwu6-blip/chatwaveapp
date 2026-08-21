@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
   <title>ChatWave</title>
   <link rel="stylesheet" href="/css/app.css">
 </head>
@@ -29,6 +29,9 @@
       <div class="search-bar">
         <input type="text" id="searchConversations" placeholder="Search conversations...">
       </div>
+
+      <!-- Status Bar -->
+      <div class="status-bar" id="statusBar"></div>
 
       <div class="conversations-list" id="conversationsList"></div>
     </aside>
@@ -299,6 +302,69 @@
   <div class="lightbox" id="lightbox" style="display:none;">
     <button class="lightbox-close" id="closeLightbox">&#10005;</button>
     <img id="lightboxImg" src="" alt="Full image">
+  </div>
+
+  <!-- Status Create Modal -->
+  <div class="modal" id="statusCreateModal" style="display:none;">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Create Status</h3>
+        <button class="close-modal" id="closeStatusCreate">&#10005;</button>
+      </div>
+      <div class="status-create-body">
+        <div class="status-type-tabs">
+          <button class="status-type-btn active" data-type="text">&#128221; Text</button>
+          <button class="status-type-btn" data-type="image">&#128247; Photo</button>
+          <button class="status-type-btn" data-type="video">&#127909; Video</button>
+        </div>
+        <div class="status-form" id="statusTextForm">
+          <textarea id="statusTextInput" placeholder="What's on your mind?" maxlength="500" rows="4"></textarea>
+          <div class="gradient-picker" id="gradientPicker"></div>
+        </div>
+        <div class="status-form" id="statusMediaForm" style="display:none;">
+          <div class="media-upload-area" id="statusMediaArea">
+            <span>&#128206; Click or drag to upload</span>
+            <input type="file" id="statusMediaInput" accept="image/*,video/*">
+          </div>
+          <div class="media-preview" id="statusMediaPreview" style="display:none;"></div>
+          <textarea id="statusCaptionInput" placeholder="Add a caption... (use @ to mention)" maxlength="300" rows="2"></textarea>
+        </div>
+        <button class="btn-primary" id="postStatusBtn">Post Status</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Viewer -->
+  <div class="status-viewer" id="statusViewer" style="display:none;">
+    <div class="status-viewer-header">
+      <div class="status-progress" id="statusProgress"></div>
+      <div class="status-viewer-user">
+        <div class="status-viewer-avatar" id="statusViewerAvatar">U</div>
+        <div class="status-viewer-info">
+          <span class="status-viewer-name" id="statusViewerName">User</span>
+          <span class="status-viewer-time" id="statusViewerTime">Just now</span>
+        </div>
+      </div>
+      <button class="status-viewer-close" id="closeStatusViewer">&#10005;</button>
+    </div>
+    <div class="status-viewer-content" id="statusViewerContent"></div>
+    <div class="status-viewer-nav">
+      <div class="status-nav-left" id="statusNavLeft"></div>
+      <div class="status-nav-right" id="statusNavRight"></div>
+    </div>
+    <div class="status-viewer-footer">
+      <div class="status-views-btn" id="statusViewsBtn">
+        <span>&#128065;</span> <span id="statusViewCount">0</span>
+      </div>
+    </div>
+    <div class="status-viewers-panel" id="statusViewersPanel" style="display:none;">
+      <div class="status-viewers-header">
+        <h4>Viewed by</h4>
+        <button class="close-modal" id="closeViewersPanel">&#10005;</button>
+      </div>
+      <div class="status-viewers-list" id="statusViewersList"></div>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

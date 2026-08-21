@@ -171,6 +171,53 @@ router.delete('/conversations/:id/members/:userId', authenticateToken, (req, res
   res.json({ message: 'Member removed' });
 });
 
+// Make member admin - admin only
+router.put('/conversations/:id/members/:userId/role', authenticateToken, (req, res) => {
+  const convId = req.params.id;
+  const targetId = parseInt(req.params.userId);
+  const { role } = req.body;
+
+  if (!['admin', 'member'].includes(role)) {
+    return res.status(400).json({ error: 'Role must be admin or member' });
+  }
+
+  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
+  if (!member || member.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can change roles' });
+  }
+
+  if (targetId === req.user.id) {
+    return res.status(400).json({ error: 'Cannot change your own role' });
+  }
+
+  const target = db.prepare('SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, targetId);
+  if (!target) {
+    return res.status(404).json({ error: 'User is not a member of this group' });
+  }
+
+  db.prepare('UPDATE conversation_members SET role = ? WHERE conversation_id = ? AND user_id = ?').run(role, convId, targetId);
+  res.json({ message: role === 'admin' ? 'User is now an admin' : 'User is now a member', role });
+});
+
+// Lock/Unlock group - admin only
+router.put('/conversations/:id/lock', authenticateToken, (req, res) => {
+  const convId = req.params.id;
+  const { locked } = req.body;
+
+  const conv = db.prepare('SELECT type FROM conversations WHERE id = ?').get(convId);
+  if (!conv || conv.type !== 'group') {
+    return res.status(400).json({ error: 'Only group chats can be locked' });
+  }
+
+  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
+  if (!member || member.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can lock/unlock the group' });
+  }
+
+  db.prepare('UPDATE conversations SET locked = ? WHERE id = ?').run(locked ? 1 : 0, convId);
+  res.json({ message: locked ? 'Group is now locked' : 'Group is now unlocked', locked: !!locked });
+});
+
 // Get group members
 router.get('/conversations/:id/members', authenticateToken, (req, res) => {
   const convId = req.params.id;

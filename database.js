@@ -103,6 +103,29 @@ db.exec(`
     FOREIGN KEY (pinned_by) REFERENCES users(id),
     UNIQUE(message_id)
   );
+
+  CREATE TABLE IF NOT EXISTS statuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL DEFAULT 'text',
+    content TEXT DEFAULT NULL,
+    media_url TEXT DEFAULT NULL,
+    mentions TEXT DEFAULT '[]',
+    bg_gradient TEXT DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS status_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status_id INTEGER NOT NULL,
+    viewer_id INTEGER NOT NULL,
+    viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (status_id) REFERENCES statuses(id),
+    FOREIGN KEY (viewer_id) REFERENCES users(id),
+    UNIQUE(status_id, viewer_id)
+  );
 `);
 
 // Migration: Add new columns to existing tables (safe for existing databases)
@@ -112,7 +135,8 @@ const migrations = [
   "ALTER TABLE conversations ADD COLUMN group_avatar TEXT DEFAULT NULL",
   "ALTER TABLE conversation_members ADD COLUMN role TEXT DEFAULT 'member'",
   "ALTER TABLE messages ADD COLUMN edited INTEGER DEFAULT 0",
-  "ALTER TABLE messages ADD COLUMN forwarded_from INTEGER DEFAULT NULL"
+  "ALTER TABLE messages ADD COLUMN forwarded_from INTEGER DEFAULT NULL",
+  "ALTER TABLE conversations ADD COLUMN locked INTEGER DEFAULT 0"
 ];
 
 for (const sql of migrations) {
