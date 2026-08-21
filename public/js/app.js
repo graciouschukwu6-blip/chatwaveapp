@@ -373,6 +373,11 @@ function appendMessage(msg, allReactions, allReceipts) {
   let contentHtml = '';
   if (msg.deleted) {
     contentHtml = '<em>This message was deleted</em>';
+  } else if (msg.view_once && !isMine) {
+    var voIcon = msg.type === 'voice' ? '&#127908;' : (msg.type === 'video' ? '&#127909;' : '&#128247;');
+    contentHtml = '<div class="view-once-msg" onclick="openViewOnce(' + msg.id + ', this)" data-msg-id="' + msg.id + '">' + voIcon + ' <span>View once</span></div>';
+  } else if (msg.view_once && isMine) {
+    contentHtml = '<div class="view-once-msg sent-view-once">&#128065; <span>View once ' + msg.type + '</span></div>';
   } else if (msg.type === 'image' || (msg.type === 'file' && msg.file_url && /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.file_url))) {
     contentHtml = '<img src="' + msg.file_url + '" alt="image" onclick="openLightbox(this.src)" loading="lazy">';
   } else if (msg.type === 'video' || (msg.type === 'file' && msg.file_url && /\.(mp4|webm|mov)$/i.test(msg.file_url))) {
@@ -642,6 +647,7 @@ function sendMessage() {
 async function handleFileUpload(e) {
   const file = e.target.files[0];
   if (!file || !currentConversation) return;
+  var isMedia = /\.(jpg|jpeg|png|gif|webp|mp4|webm|mov)$/i.test(file.name);
 
   const formData = new FormData();
   formData.append('file', file);
@@ -658,13 +664,18 @@ async function handleFileUpload(e) {
       if (/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)) type = 'image';
       else if (/\.(mp4|webm|mov)$/i.test(file.name)) type = 'video';
 
+      var viewOnce = false;
+      if (isMedia) {
+        viewOnce = confirm('Send as view once? (media will disappear after being viewed)');
+      }
       socket.emit('send_message', {
         conversation_id: currentConversation.id,
         content: file.name,
         type: type,
         file_url: data.url,
         file_name: file.name,
-        reply_to: replyingTo
+        reply_to: replyingTo,
+        view_once: viewOnce ? 1 : 0
       });
       cancelReply();
     }
@@ -712,12 +723,14 @@ async function sendRecording() {
       });
       const data = await res.json();
       if (data.url) {
+        var voiceViewOnce = confirm('Send as view once? (voice note will disappear after being heard)');
         socket.emit('send_message', {
           conversation_id: currentConversation.id,
           content: 'Voice message',
           type: 'voice',
           file_url: data.url,
-          file_name: data.name
+          file_name: data.name,
+          view_once: voiceViewOnce ? 1 : 0
         });
       }
     } catch(e) { console.error(e); }
@@ -1289,6 +1302,36 @@ function openLightbox(src) {
   document.getElementById('lightbox').style.display = 'flex';
 }
 
+// ===== VIEW ONCE =====
+async function openViewOnce(msgId, el) {
+  if (el.classList.contains('opened')) return;
+  try {
+    var res = await fetch('/api/chat/messages/' + msgId + '/view-once', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    if (res.ok && data.file_url) {
+      if (data.type === 'voice') {
+        el.innerHTML = '<audio src="' + data.file_url + '" autoplay controls></audio><p style="font-size:11px;color:var(--text-muted);margin-top:4px;">This will disappear when you leave</p>';
+      } else if (data.type === 'video') {
+        el.innerHTML = '<video src="' + data.file_url + '" autoplay playsinline controls style="max-width:100%;border-radius:8px;"></video><p style="font-size:11px;color:var(--text-muted);margin-top:4px;">View once</p>';
+      } else {
+        el.innerHTML = '<img src="' + data.file_url + '" style="max-width:100%;border-radius:8px;" onclick="openLightbox(this.src)"><p style="font-size:11px;color:var(--text-muted);margin-top:4px;">View once</p>';
+      }
+      el.classList.add('opened');
+      // After 10 seconds, replace with "opened" message
+      setTimeout(function() {
+        el.innerHTML = '<em style="color:var(--text-muted);">&#128065; Opened</em>';
+      }, 10000);
+    } else {
+      el.innerHTML = '<em style="color:var(--text-muted);">&#128065; Opened</em>';
+    }
+  } catch(e) {
+    el.innerHTML = '<em style="color:var(--text-muted);">Failed to load</em>';
+  }
+}
+
 function closeLightbox() {
   document.getElementById('lightbox').style.display = 'none';
   document.getElementById('lightboxImg').src = '';
@@ -1624,11 +1667,14 @@ function showCurrentStatus() {
 
   // Views (only for own statuses)
   var viewsBtn = document.getElementById('statusViewsBtn');
+  var replyArea = document.getElementById('statusReplyArea');
   if (currentStatusUser.user_id === currentUser.id) {
     viewsBtn.style.display = 'inline-flex';
     document.getElementById('statusViewCount').textContent = s.view_count || 0;
+    replyArea.style.display = 'none';
   } else {
     viewsBtn.style.display = 'none';
+    replyArea.style.display = 'flex';
     // Mark as viewed
     fetch('/api/status/' + s.id + '/view', {
       method: 'POST',
@@ -1710,6 +1756,48 @@ document.getElementById('closeViewersPanel').addEventListener('click', function(
   document.getElementById('statusViewersPanel').style.display = 'none';
   showCurrentStatus(); // Resume timer
 });
+
+// Status Reply
+document.getElementById('statusReplySend').addEventListener('click', sendStatusReply);
+document.getElementById('statusReplyInput').addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); sendStatusReply(); }
+});
+document.getElementById('statusReplyInput').addEventListener('focus', function() {
+  clearTimeout(statusTimer);
+});
+
+async function sendStatusReply() {
+  var input = document.getElementById('statusReplyInput');
+  var text = input.value.trim();
+  if (!text || !currentStatusUser) return;
+
+  var statusOwnerId = currentStatusUser.user_id;
+  var s = currentStatusUser.statuses[currentStatusIndex];
+
+  // Start or get private conversation with the status owner
+  try {
+    var res = await fetch('/api/chat/conversations/private', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ chat_number: currentStatusUser.chat_number })
+    });
+    var data = await res.json();
+    if (data.conversation_id) {
+      // Send the reply as a message with status reference
+      var statusRef = s.type === 'text' ? s.content.substring(0, 50) : (s.type === 'image' ? 'Photo' : 'Video');
+      socket.emit('send_message', {
+        conversation_id: data.conversation_id,
+        content: text,
+        type: 'text',
+        reply_to: null
+      });
+      input.value = '';
+      alert('Reply sent to ' + currentStatusUser.username);
+    }
+  } catch(e) {
+    alert('Failed to send reply');
+  }
+}
 
 function formatStatusTime(dateStr) {
   if (!dateStr) return '';

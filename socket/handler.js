@@ -20,7 +20,7 @@ function setupSocket(io) {
 
     // Send message
     socket.on('send_message', (data) => {
-      const { conversation_id, content, type = 'text', file_url, file_name, reply_to } = data;
+      const { conversation_id, content, type = 'text', file_url, file_name, reply_to, view_once = 0 } = data;
 
       const member = db.prepare(
         'SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?'
@@ -64,8 +64,8 @@ function setupSocket(io) {
       }
 
       const result = db.prepare(
-        'INSERT INTO messages (conversation_id, sender_id, content, type, file_url, file_name, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).run(conversation_id, user.id, content, type, file_url || null, file_name || null, reply_to || null);
+        'INSERT INTO messages (conversation_id, sender_id, content, type, file_url, file_name, reply_to, view_once) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(conversation_id, user.id, content, type, file_url || null, file_name || null, reply_to || null, view_once ? 1 : 0);
 
       // Get reply info if replying
       let replyData = null;
@@ -92,6 +92,7 @@ function setupSocket(io) {
         reply_sender_name: replyData ? replyData.sender_name : null,
         edited: 0,
         forwarded_from: null,
+        view_once: view_once ? 1 : 0,
         deleted: 0,
         created_at: new Date().toISOString()
       };

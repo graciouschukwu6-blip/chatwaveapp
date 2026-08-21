@@ -494,4 +494,22 @@ router.get('/blocked', authenticateToken, (req, res) => {
   res.json({ blocked });
 });
 
+// Open view-once message
+router.post('/messages/:id/view-once', authenticateToken, (req, res) => {
+  const msgId = req.params.id;
+  const msg = db.prepare('SELECT * FROM messages WHERE id = ? AND view_once = 1 AND deleted = 0').get(msgId);
+  if (!msg) return res.status(404).json({ error: 'Message not found or already viewed' });
+
+  // Check user is member of conversation
+  const member = db.prepare('SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(msg.conversation_id, req.user.id);
+  if (!member) return res.status(403).json({ error: 'Not authorized' });
+
+  // If not the sender, mark as deleted after returning content
+  if (msg.sender_id !== req.user.id) {
+    db.prepare('UPDATE messages SET deleted = 1, content = ?, file_url = NULL, file_name = NULL WHERE id = ?').run('View once media opened', msgId);
+  }
+
+  res.json({ file_url: msg.file_url, type: msg.type, file_name: msg.file_name });
+});
+
 module.exports = router;

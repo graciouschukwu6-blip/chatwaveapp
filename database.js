@@ -136,7 +136,8 @@ const migrations = [
   "ALTER TABLE conversation_members ADD COLUMN role TEXT DEFAULT 'member'",
   "ALTER TABLE messages ADD COLUMN edited INTEGER DEFAULT 0",
   "ALTER TABLE messages ADD COLUMN forwarded_from INTEGER DEFAULT NULL",
-  "ALTER TABLE conversations ADD COLUMN locked INTEGER DEFAULT 0"
+  "ALTER TABLE conversations ADD COLUMN locked INTEGER DEFAULT 0",
+  "ALTER TABLE messages ADD COLUMN view_once INTEGER DEFAULT 0"
 ];
 
 for (const sql of migrations) {
