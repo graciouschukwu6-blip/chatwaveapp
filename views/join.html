@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Group - ChatWave</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #111b21;
+      color: #e9edef;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    body::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 200px;
+      background: #00a884;
+    }
+    .join-card {
+      position: relative;
+      background: #202c33;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      z-index: 1;
+    }
+    .group-avatar {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: #00a884;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px; font-weight: 700; color: #fff;
+      margin: 0 auto 16px;
+      background-size: cover;
+      background-position: center;
+    }
+    .group-name { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+    .group-desc { font-size: 14px; color: rgba(233,237,239,0.6); margin-bottom: 8px; }
+    .group-members { font-size: 13px; color: rgba(233,237,239,0.5); margin-bottom: 24px; }
+    .join-btn {
+      width: 100%; padding: 14px;
+      background: #00a884;
+      border: none; border-radius: 8px;
+      color: #fff; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .join-btn:hover { background: #008069; }
+    .join-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error-msg { color: #ea0038; font-size: 13px; margin-top: 12px; display: none; }
+    .success-msg { color: #00a884; font-size: 13px; margin-top: 12px; display: none; }
+    .login-link { margin-top: 16px; font-size: 13px; color: rgba(233,237,239,0.5); }
+    .login-link a { color: #00a884; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="join-card">
+    <div class="group-avatar" id="groupAvatar">G</div>
+    <h2 class="group-name" id="groupName">Loading...</h2>
+    <p class="group-desc" id="groupDesc"></p>
+    <p class="group-members" id="groupMembers"></p>
+    <button class="join-btn" id="joinBtn" disabled>Join Group</button>
+    <p class="error-msg" id="errorMsg"></p>
+    <p class="success-msg" id="successMsg"></p>
+    <p class="login-link" id="loginLink" style="display:none;">
+      <a href="/">Login first</a> to join this group
+    </p>
+  </div>
+
+  <script>
+    const code = window.location.pathname.split('/join/')[1];
+    const token = localStorage.getItem('token');
+
+    async function loadGroupInfo() {
+      try {
+        const res = await fetch('/api/chat/invite-info/' + code);
+        if (!res.ok) {
+          document.getElementById('groupName').textContent = 'Invalid Link';
+          document.getElementById('errorMsg').textContent = 'This invite link is invalid or expired.';
+          document.getElementById('errorMsg').style.display = 'block';
+          return;
+        }
+        const data = await res.json();
+        document.getElementById('groupName').textContent = data.name;
+        document.getElementById('groupDesc').textContent = data.description || '';
+        document.getElementById('groupMembers').textContent = data.member_count + ' members';
+
+        if (data.avatar) {
+          const av = document.getElementById('groupAvatar');
+          av.style.backgroundImage = 'url(' + data.avatar + ')';
+          av.textContent = '';
+        } else {
+          document.getElementById('groupAvatar').textContent = data.name.charAt(0).toUpperCase();
+        }
+
+        if (token) {
+          document.getElementById('joinBtn').disabled = false;
+        } else {
+          document.getElementById('loginLink').style.display = 'block';
+        }
+      } catch(e) {
+        document.getElementById('groupName').textContent = 'Error';
+        document.getElementById('errorMsg').textContent = 'Could not load group info.';
+        document.getElementById('errorMsg').style.display = 'block';
+      }
+    }
+
+    document.getElementById('joinBtn').addEventListener('click', async () => {
+      if (!token) return;
+      const btn = document.getElementById('joinBtn');
+      btn.disabled = true;
+      btn.textContent = 'Joining...';
+
+      try {
+        const res = await fetch('/api/chat/join/' + code, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (data.already_member) {
+            document.getElementById('successMsg').textContent = 'You are already a member!';
+          } else {
+            document.getElementById('successMsg').textContent = 'Joined successfully!';
+          }
+          document.getElementById('successMsg').style.display = 'block';
+          setTimeout(() => { window.location.href = '/app'; }, 1000);
+        } else {
+          document.getElementById('errorMsg').textContent = data.error || 'Failed to join';
+          document.getElementById('errorMsg').style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Join Group';
+        }
+      } catch(e) {
+        document.getElementById('errorMsg').textContent = 'Network error';
+        document.getElementById('errorMsg').style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Join Group';
+      }
+    });
+
+    loadGroupInfo();
+  </script>
+</body>
+</html>

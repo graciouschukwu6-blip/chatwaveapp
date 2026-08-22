@@ -290,6 +290,17 @@ function setupSocket(io) {
       if (targetSocket) { io.sockets.sockets.get(targetSocket)?.join('conv_' + data.conversation_id); }
     });
 
+    // Group updated (description, etc.)
+    socket.on('group_updated', (data) => {
+      io.to('conv_' + data.conversation_id).emit('group_updated', data);
+    });
+
+    // Member joined via invite link
+    socket.on('member_joined', (data) => {
+      io.to('conv_' + data.conversation_id).emit('member_joined', data);
+      socket.join('conv_' + data.conversation_id);
+    });
+
     // Disconnect
     socket.on('disconnect', async () => {
       onlineUsers.delete(user.id);

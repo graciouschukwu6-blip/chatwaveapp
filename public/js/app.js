@@ -246,6 +246,18 @@ function setupSocketEvents() {
     }
   });
 
+  socket.on('group_updated', (data) => {
+    if (currentConversation && data.conversation_id === currentConversation.id) {
+      if (data.description !== undefined) currentConversation.description = data.description;
+    }
+  });
+
+  socket.on('member_joined', (data) => {
+    if (currentConversation && data.conversation_id === currentConversation.id) {
+      loadConversations();
+    }
+  });
+
   socket.on('connect_error', (err) => {
     if (err.message === 'Authentication error') {
       localStorage.clear();
@@ -347,6 +359,10 @@ async function openConversation(conv) {
   } else {
     statusEl.textContent = conv.member_count + ' members';
     statusEl.className = 'chat-status';
+    // Show description below if exists
+    if (conv.description) {
+      statusEl.textContent = conv.description.substring(0, 40) + (conv.description.length > 40 ? '...' : '');
+    }
   }
 
   await loadMessages(conv.id);
@@ -608,6 +624,8 @@ function setupEventListeners() {
       e.target.classList.add('active');
       document.getElementById('privateTab').style.display = e.target.dataset.tab === 'private' ? 'block' : 'none';
       document.getElementById('groupTab').style.display = e.target.dataset.tab === 'group' ? 'block' : 'none';
+      var bt = document.getElementById('broadcastTab');
+      if (bt) bt.style.display = e.target.dataset.tab === 'broadcast' ? 'block' : 'none';
     });
   });
 
@@ -1187,6 +1205,17 @@ async function showChatInfo() {
       let html = '<div style="text-align:center;margin-bottom:20px;">';
       html += '<h3>' + escapeHtml(currentConversation.name || 'Group') + '</h3>';
       html += '<p style="font-size:13px;color:var(--text-muted);">' + data.members.length + ' members</p>';
+
+      // Group Description
+      var desc = currentConversation.description || '';
+      if (isAdmin) {
+        html += '<div style="margin-top:12px;text-align:left;"><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:4px;">Description</label>';
+        html += '<textarea id="groupDescInput" rows="2" style="width:100%;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;outline:none;resize:none;font-family:inherit;" placeholder="Add group description...">' + escapeHtml(desc) + '</textarea>';
+        html += '<button onclick="updateGroupDescription('+currentConversation.id+', document.getElementById(\'groupDescInput\').value)" style="margin-top:6px;padding:6px 12px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;">Save</button></div>';
+      } else if (desc) {
+        html += '<p style="margin-top:8px;font-size:13px;color:var(--text-secondary);font-style:italic;">' + escapeHtml(desc) + '</p>';
+      }
+
       if (isAdmin) {
         var lockStatus = currentConversation.locked ? true : false;
         html += '<div style="margin-top:12px;"><button class="btn-lock" onclick="toggleGroupLock()">' + (lockStatus ? '&#128275; Unlock Group' : '&#128274; Lock Group') + '</button></div>';
@@ -1207,6 +1236,13 @@ async function showChatInfo() {
         }
         html += '</div>';
       });
+
+      // Invite Link (admin only)
+      if (isAdmin) {
+        var inviteHtml = await showInviteLink(currentConversation.id);
+        html += inviteHtml;
+      }
+
       body.innerHTML = commonHtml + html;
     } catch(e) { body.innerHTML = '<p>Error loading info</p>'; }
   } else {
@@ -2675,4 +2711,304 @@ document.addEventListener('DOMContentLoaded', function() {
 // Also init if DOM already ready
 if (document.readyState !== 'loading') {
   setTimeout(initExpressionPanel, 100);
+}
+
+// ===== PHASE 3: IN-CHAT SEARCH =====
+var chatSearchTimeout = null;
+
+function initChatSearch() {
+  var btn = document.getElementById('chatSearchBtn');
+  var bar = document.getElementById('chatSearchBar');
+  var input = document.getElementById('chatSearchInput');
+  var closeBtn = document.getElementById('chatSearchClose');
+  var results = document.getElementById('chatSearchResults');
+
+  if (btn) btn.addEventListener('click', function() {
+    bar.style.display = 'flex';
+    input.focus();
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', function() {
+    bar.style.display = 'none';
+    results.style.display = 'none';
+    input.value = '';
+    document.getElementById('chatSearchCount').textContent = '';
+  });
+
+  if (input) input.addEventListener('input', function() {
+    clearTimeout(chatSearchTimeout);
+    var q = input.value.trim();
+    if (!q || !currentConversation) {
+      results.style.display = 'none';
+      document.getElementById('chatSearchCount').textContent = '';
+      return;
+    }
+    chatSearchTimeout = setTimeout(function() { searchInChat(q); }, 300);
+  });
+}
+
+async function searchInChat(q) {
+  if (!currentConversation) return;
+  try {
+    var res = await fetch('/api/chat/conversations/' + currentConversation.id + '/search?q=' + encodeURIComponent(q), {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    var results = document.getElementById('chatSearchResults');
+    var countEl = document.getElementById('chatSearchCount');
+
+    countEl.textContent = data.count + ' found';
+
+    if (data.messages.length === 0) {
+      results.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">No results found</div>';
+      results.style.display = 'block';
+      return;
+    }
+
+    results.innerHTML = data.messages.map(function(m) {
+      var time = new Date(m.created_at).toLocaleString();
+      var text = m.content || '[media]';
+      if (text.length > 80) text = text.substring(0, 80) + '...';
+      return '<div class="chat-search-result-item" data-msg-id="' + m.id + '">' +
+        '<span class="result-sender">' + escapeHtml(m.sender_name) + '</span>' +
+        '<span class="result-text">' + escapeHtml(text) + '</span>' +
+        '<span class="result-time">' + time + '</span></div>';
+    }).join('');
+    results.style.display = 'block';
+
+    results.querySelectorAll('.chat-search-result-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        var msgId = item.dataset.msgId;
+        scrollToMessage(msgId);
+        results.style.display = 'none';
+      });
+    });
+  } catch(e) { console.error('Search error:', e); }
+}
+
+function scrollToMessage(msgId) {
+  var msgEl = document.querySelector('[data-msg-id="' + msgId + '"]');
+  if (msgEl) {
+    msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    msgEl.classList.add('msg-highlight');
+    setTimeout(function() { msgEl.classList.remove('msg-highlight'); }, 2500);
+  }
+}
+
+// ===== PHASE 3: GROUP INVITE LINKS =====
+
+async function showInviteLink(convId) {
+  try {
+    var res = await fetch('/api/chat/conversations/' + convId + '/invite-link', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    if (data.invite_code) {
+      var link = window.location.origin + '/join/' + data.invite_code;
+      var html = '<div style="margin:16px 0;padding:12px;background:var(--surface);border-radius:8px;">' +
+        '<label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:6px;">Invite Link</label>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+        '<input type="text" value="' + link + '" readonly style="flex:1;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;outline:none;" id="inviteLinkInput">' +
+        '<button onclick="copyInviteLink()" style="padding:8px 12px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;">Copy</button>' +
+        '</div>' +
+        '<button onclick="resetInviteLink(' + convId + ')" style="margin-top:8px;background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer;">Reset link</button>' +
+        '</div>';
+      return html;
+    }
+  } catch(e) {}
+  return '';
+}
+
+function copyInviteLink() {
+  var input = document.getElementById('inviteLinkInput');
+  if (input) {
+    input.select();
+    document.execCommand('copy');
+    input.style.borderColor = 'var(--accent)';
+    setTimeout(function() { input.style.borderColor = 'var(--border)'; }, 1000);
+  }
+}
+
+async function resetInviteLink(convId) {
+  try {
+    var res = await fetch('/api/chat/conversations/' + convId + '/reset-invite', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    if (data.invite_code) {
+      var input = document.getElementById('inviteLinkInput');
+      if (input) input.value = window.location.origin + '/join/' + data.invite_code;
+    }
+  } catch(e) {}
+}
+
+// ===== PHASE 3: GROUP DESCRIPTION =====
+
+async function updateGroupDescription(convId, description) {
+  try {
+    var res = await fetch('/api/chat/conversations/' + convId + '/description', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description })
+    });
+    if (res.ok) {
+      socket.emit('group_updated', { conversation_id: convId, description, updated_by: currentUser.username });
+    }
+  } catch(e) {}
+}
+
+// ===== PHASE 3: BROADCASTS =====
+var broadcasts = [];
+var broadcastSelectedIds = [];
+
+async function loadBroadcasts() {
+  try {
+    var res = await fetch('/api/chat/broadcasts', { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    broadcasts = data.broadcasts || [];
+    renderBroadcastsInSidebar();
+  } catch(e) {}
+}
+
+function renderBroadcastsInSidebar() {
+  var existing = document.getElementById('broadcastSection');
+  if (existing) existing.remove();
+  if (broadcasts.length === 0) return;
+
+  var section = document.createElement('div');
+  section.id = 'broadcastSection';
+  section.className = 'broadcast-section';
+  section.innerHTML = '<div class="broadcast-section-title">&#128226; Broadcasts</div>' +
+    broadcasts.map(function(b) {
+      return '<div class="broadcast-item" data-id="' + b.id + '">' +
+        '<span style="font-size:18px;">&#128226;</span>' +
+        '<span class="bi-name">' + escapeHtml(b.name) + '</span>' +
+        '<span class="bi-count">' + b.member_count + ' recipients</span></div>';
+    }).join('');
+
+  var convList = document.querySelector('.conversations-list');
+  if (convList) convList.parentNode.insertBefore(section, convList);
+
+  section.querySelectorAll('.broadcast-item').forEach(function(item) {
+    item.addEventListener('click', function() {
+      openBroadcastSend(parseInt(item.dataset.id));
+    });
+  });
+}
+
+function openBroadcastSend(broadcastId) {
+  var b = broadcasts.find(function(br) { return br.id === broadcastId; });
+  if (!b) return;
+  document.getElementById('broadcastSendInfo').textContent = 'Sending to "' + b.name + '" (' + b.member_count + ' recipients)';
+  document.getElementById('broadcastMsgInput').value = '';
+  document.getElementById('broadcastSendModal').style.display = 'flex';
+  document.getElementById('sendBroadcastBtn').onclick = function() { sendBroadcast(broadcastId); };
+}
+
+async function sendBroadcast(broadcastId) {
+  var content = document.getElementById('broadcastMsgInput').value.trim();
+  if (!content) return;
+  var btn = document.getElementById('sendBroadcastBtn');
+  btn.textContent = 'Sending...';
+  btn.disabled = true;
+  try {
+    var res = await fetch('/api/chat/broadcasts/' + broadcastId + '/send', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+    var data = await res.json();
+    btn.textContent = 'Sent to ' + data.sent + '!';
+    setTimeout(function() {
+      document.getElementById('broadcastSendModal').style.display = 'none';
+      btn.textContent = 'Send to All';
+      btn.disabled = false;
+    }, 1500);
+  } catch(e) {
+    btn.textContent = 'Send to All';
+    btn.disabled = false;
+  }
+}
+
+function initBroadcastCreate() {
+  var searchInput = document.getElementById('broadcastMemberSearch');
+  var memberList = document.getElementById('broadcastMemberList');
+  var selectedDiv = document.getElementById('broadcastSelectedMembers');
+  broadcastSelectedIds = [];
+
+  if (searchInput) searchInput.addEventListener('input', async function() {
+    var q = searchInput.value.trim();
+    if (!q) { memberList.innerHTML = ''; return; }
+    var res = await fetch('/api/chat/users/search?q=' + encodeURIComponent(q), {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    memberList.innerHTML = data.users.map(function(u) {
+      var sel = broadcastSelectedIds.includes(u.id) ? ' selected' : '';
+      return '<div class="broadcast-member-item' + sel + '" data-id="' + u.id + '" data-name="' + escapeHtml(u.username) + '">' +
+        '<span class="bm-name">' + escapeHtml(u.username) + ' <small style="color:var(--text-muted);">#' + u.chat_number + '</small></span>' +
+        '<span class="bm-check">&#10003;</span></div>';
+    }).join('');
+
+    memberList.querySelectorAll('.broadcast-member-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        var id = parseInt(item.dataset.id);
+        var name = item.dataset.name;
+        if (broadcastSelectedIds.includes(id)) {
+          broadcastSelectedIds = broadcastSelectedIds.filter(function(x) { return x !== id; });
+          item.classList.remove('selected');
+        } else {
+          broadcastSelectedIds.push(id);
+          item.classList.add('selected');
+        }
+        renderBroadcastSelected();
+      });
+    });
+  });
+
+  var createBtn = document.getElementById('createBroadcastBtn');
+  if (createBtn) createBtn.addEventListener('click', createBroadcast);
+
+  var closeBtn = document.getElementById('closeBroadcastSend');
+  if (closeBtn) closeBtn.addEventListener('click', function() {
+    document.getElementById('broadcastSendModal').style.display = 'none';
+  });
+}
+
+function renderBroadcastSelected() {
+  var div = document.getElementById('broadcastSelectedMembers');
+  div.innerHTML = broadcastSelectedIds.length > 0 ? '<small style="color:var(--text-muted);">' + broadcastSelectedIds.length + ' selected</small>' : '';
+}
+
+async function createBroadcast() {
+  var name = document.getElementById('broadcastName').value.trim();
+  if (!name || broadcastSelectedIds.length === 0) return;
+  try {
+    var res = await fetch('/api/chat/broadcasts', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, member_ids: broadcastSelectedIds })
+    });
+    if (res.ok) {
+      document.getElementById('newChatModal').style.display = 'none';
+      document.getElementById('broadcastName').value = '';
+      broadcastSelectedIds = [];
+      renderBroadcastSelected();
+      loadBroadcasts();
+    }
+  } catch(e) {}
+}
+
+// ===== PHASE 3 INIT =====
+document.addEventListener('DOMContentLoaded', function() {
+  initChatSearch();
+  initBroadcastCreate();
+  loadBroadcasts();
+});
+
+if (document.readyState !== 'loading') {
+  initChatSearch();
+  initBroadcastCreate();
+  loadBroadcasts();
 }

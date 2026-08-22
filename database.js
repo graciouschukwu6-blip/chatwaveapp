@@ -33,6 +33,8 @@ async function initDb() {
       group_avatar TEXT DEFAULT NULL,
       locked INTEGER DEFAULT 0,
       disappearing_timer INTEGER DEFAULT 0,
+      invite_code TEXT DEFAULT NULL,
+      description TEXT DEFAULT NULL,
       created_by INTEGER REFERENCES users(id),
       created_at TIMESTAMP DEFAULT NOW()
     );
@@ -151,6 +153,20 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(poll_id, option_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS broadcasts (
+      id SERIAL PRIMARY KEY,
+      creator_id INTEGER NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS broadcast_members (
+      id SERIAL PRIMARY KEY,
+      broadcast_id INTEGER NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      UNIQUE(broadcast_id, user_id)
+    );
   `);
 
   // Add columns if they don't exist (safe migration for existing DBs)
@@ -161,6 +177,8 @@ async function initDb() {
     `ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS wallpaper TEXT DEFAULT NULL`,
     `ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NULL`,
     `ALTER TABLE messages ADD COLUMN IF NOT EXISTS link_preview JSONB DEFAULT NULL`
+    ,`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS invite_code TEXT DEFAULT NULL`,
+    `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS description TEXT DEFAULT NULL`
   ];
 
   for (const m of migrations) {

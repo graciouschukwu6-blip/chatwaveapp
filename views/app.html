@@ -60,10 +60,21 @@
             </div>
           </div>
           <div class="chat-header-actions">
+            <button class="icon-btn" id="chatSearchBtn" title="Search in chat">&#128269;</button>
             <button class="icon-btn" id="pinnedBtn" title="Pinned Messages">&#128204;</button>
             <button class="icon-btn" id="chatInfoBtn" title="Info">i</button>
           </div>
         </div>
+
+        <!-- In-Chat Search Bar -->
+        <div class="chat-search-bar" id="chatSearchBar" style="display:none;">
+          <input type="text" id="chatSearchInput" placeholder="Search in this conversation..." autocomplete="off">
+          <span class="chat-search-count" id="chatSearchCount"></span>
+          <button class="icon-btn" id="chatSearchClose" title="Close search">&#10005;</button>
+        </div>
+
+        <!-- In-Chat Search Results -->
+        <div class="chat-search-results" id="chatSearchResults" style="display:none;"></div>
 
         <!-- Pinned messages bar -->
         <div class="pinned-bar" id="pinnedBar" style="display:none;">
@@ -122,6 +133,7 @@
       <div class="modal-tabs">
         <button class="tab-btn active" data-tab="private">Direct Message</button>
         <button class="tab-btn" data-tab="group">Group Chat</button>
+        <button class="tab-btn" data-tab="broadcast">Broadcast</button>
       </div>
       <div class="tab-content active" id="privateTab">
         <div class="input-group">
@@ -141,6 +153,19 @@
           <input type="text" id="groupMembers" placeholder="e.g. 12345678, 87654321">
         </div>
         <button class="btn-primary" id="createGroupChat">Create Group</button>
+      </div>
+      <div class="tab-content" id="broadcastTab" style="display:none;">
+        <div class="input-group">
+          <label>Broadcast Name</label>
+          <input type="text" id="broadcastName" placeholder="e.g. Announcements">
+        </div>
+        <div class="input-group">
+          <label>Search contacts to add</label>
+          <input type="text" id="broadcastMemberSearch" placeholder="Search by name or chat number...">
+        </div>
+        <div id="broadcastMemberList" class="broadcast-member-list"></div>
+        <div id="broadcastSelectedMembers" class="broadcast-selected" style="margin-bottom:12px;"></div>
+        <button class="btn-primary" id="createBroadcastBtn">Create Broadcast</button>
       </div>
     </div>
   </div>
@@ -428,6 +453,18 @@
       <button class="btn-primary mute-option" data-duration="1w" style="margin-bottom:8px;">Mute for 1 week</button>
       <button class="btn-primary mute-option" data-duration="forever" style="margin-bottom:8px;">Mute always</button>
       <button class="btn-danger mute-option" data-duration="off">Unmute</button>
+    </div>
+  </div>
+
+  <!-- Broadcast Send Modal -->
+  <div class="modal" id="broadcastSendModal" style="display:none;">
+    <div class="modal-content modal-sm">
+      <div class="modal-header"><h3>&#128226; Send Broadcast</h3><button class="close-modal" id="closeBroadcastSend">&#10005;</button></div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;" id="broadcastSendInfo">Sending to broadcast...</p>
+      <div class="input-group">
+        <textarea id="broadcastMsgInput" rows="3" placeholder="Type your message..."></textarea>
+      </div>
+      <button class="btn-primary" id="sendBroadcastBtn">Send to All</button>
     </div>
   </div>
 

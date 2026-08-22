@@ -1,5 +1,6 @@
 const express = require('express');
 const multer = require('multer');
+const crypto = require('crypto');
 const path = require('path');
 const { query } = require('../database');
 const { authenticateToken } = require('../middleware/auth');
@@ -74,7 +75,8 @@ router.post('/conversations/group', authenticateToken, async (req, res) => {
   const { name, members } = req.body;
   if (!name || !members || members.length < 1) return res.status(400).json({ error: 'Group name and at least 1 member required' });
 
-  const conv = await query('INSERT INTO conversations (type, name, created_by) VALUES ($1, $2, $3) RETURNING id', ['group', name, req.user.id]);
+  const inviteCode = crypto.randomBytes(4).toString('hex');
+  const conv = await query('INSERT INTO conversations (type, name, created_by, invite_code) VALUES ($1, $2, $3, $4) RETURNING id', ['group', name, req.user.id, inviteCode]);
   const convId = conv.rows[0].id;
   await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, req.user.id, 'admin']);
 
@@ -519,6 +521,194 @@ router.post('/messages/:id/view-once', authenticateToken, async (req, res) => {
     await query('UPDATE messages SET deleted = 1, content = $1, file_url = NULL, file_name = NULL WHERE id = $2', ['View once media opened', req.params.id]);
   }
   res.json({ file_url: msg.file_url, type: msg.type, file_name: msg.file_name });
+});
+
+// ===== GROUP INVITE LINKS =====
+
+// Get invite link (admin only)
+router.get('/conversations/:id/invite-link', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const conv = await query('SELECT type, invite_code FROM conversations WHERE id = $1', [convId]);
+  if (conv.rows.length === 0 || conv.rows[0].type !== 'group') return res.status(400).json({ error: 'Not a group' });
+
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can get invite link' });
+
+  let code = conv.rows[0].invite_code;
+  if (!code) {
+    code = crypto.randomBytes(4).toString('hex');
+    await query('UPDATE conversations SET invite_code = $1 WHERE id = $2', [code, convId]);
+  }
+  res.json({ invite_code: code });
+});
+
+// Reset invite link (admin only)
+router.post('/conversations/:id/reset-invite', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can reset invite link' });
+
+  const code = crypto.randomBytes(4).toString('hex');
+  await query('UPDATE conversations SET invite_code = $1 WHERE id = $2', [code, convId]);
+  res.json({ invite_code: code });
+});
+
+// Join group via invite code
+router.post('/join/:code', authenticateToken, async (req, res) => {
+  const { code } = req.params;
+  const conv = await query('SELECT id, name FROM conversations WHERE invite_code = $1 AND type = $2', [code, 'group']);
+  if (conv.rows.length === 0) return res.status(404).json({ error: 'Invalid invite link' });
+
+  const convId = conv.rows[0].id;
+  const existing = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (existing.rows.length > 0) return res.json({ conversation_id: convId, name: conv.rows[0].name, already_member: true });
+
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [convId, req.user.id, 'member']);
+  res.json({ conversation_id: convId, name: conv.rows[0].name, joined: true });
+});
+
+// Get group info for invite page (no auth needed for basic info)
+router.get('/invite-info/:code', async (req, res) => {
+  const { code } = req.params;
+  const conv = await query('SELECT id, name, group_avatar, description FROM conversations WHERE invite_code = $1 AND type = $2', [code, 'group']);
+  if (conv.rows.length === 0) return res.status(404).json({ error: 'Invalid invite link' });
+
+  const memberCount = await query('SELECT COUNT(*) as count FROM conversation_members WHERE conversation_id = $1', [conv.rows[0].id]);
+  res.json({ name: conv.rows[0].name, avatar: conv.rows[0].group_avatar, description: conv.rows[0].description, member_count: parseInt(memberCount.rows[0].count) });
+});
+
+// ===== GROUP DESCRIPTION =====
+
+// Update group description (admin only)
+router.put('/conversations/:id/description', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const { description } = req.body;
+
+  const conv = await query('SELECT type FROM conversations WHERE id = $1', [convId]);
+  if (conv.rows.length === 0 || conv.rows[0].type !== 'group') return res.status(400).json({ error: 'Not a group' });
+
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can update description' });
+
+  await query('UPDATE conversations SET description = $1 WHERE id = $2', [description || null, convId]);
+  res.json({ description: description || null });
+});
+
+// ===== BROADCAST LISTS =====
+
+// Create broadcast
+router.post('/broadcasts', authenticateToken, async (req, res) => {
+  const { name, member_ids } = req.body;
+  if (!name || !member_ids || member_ids.length < 1) return res.status(400).json({ error: 'Name and at least 1 member required' });
+
+  const result = await query('INSERT INTO broadcasts (creator_id, name) VALUES ($1, $2) RETURNING id', [req.user.id, name]);
+  const broadcastId = result.rows[0].id;
+
+  for (const userId of member_ids) {
+    await query('INSERT INTO broadcast_members (broadcast_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [broadcastId, userId]);
+  }
+  res.status(201).json({ id: broadcastId, name });
+});
+
+// Get user's broadcasts
+router.get('/broadcasts', authenticateToken, async (req, res) => {
+  const result = await query(`
+    SELECT b.*, (SELECT COUNT(*) FROM broadcast_members WHERE broadcast_id = b.id) as member_count
+    FROM broadcasts b WHERE b.creator_id = $1 ORDER BY b.created_at DESC
+  `, [req.user.id]);
+  res.json({ broadcasts: result.rows });
+});
+
+// Get broadcast details
+router.get('/broadcasts/:id', authenticateToken, async (req, res) => {
+  const broadcast = await query('SELECT * FROM broadcasts WHERE id = $1 AND creator_id = $2', [req.params.id, req.user.id]);
+  if (broadcast.rows.length === 0) return res.status(404).json({ error: 'Broadcast not found' });
+
+  const members = await query(`
+    SELECT u.id, u.username, u.chat_number, u.avatar
+    FROM broadcast_members bm JOIN users u ON bm.user_id = u.id
+    WHERE bm.broadcast_id = $1
+  `, [req.params.id]);
+  res.json({ broadcast: broadcast.rows[0], members: members.rows });
+});
+
+// Send broadcast message
+router.post('/broadcasts/:id/send', authenticateToken, async (req, res) => {
+  const { content, type = 'text' } = req.body;
+  if (!content) return res.status(400).json({ error: 'Content required' });
+
+  const broadcast = await query('SELECT * FROM broadcasts WHERE id = $1 AND creator_id = $2', [req.params.id, req.user.id]);
+  if (broadcast.rows.length === 0) return res.status(404).json({ error: 'Broadcast not found' });
+
+  const members = await query('SELECT user_id FROM broadcast_members WHERE broadcast_id = $1', [req.params.id]);
+  let sent = 0;
+
+  for (const m of members.rows) {
+    // Find or create private conversation
+    let conv = await query(`
+      SELECT c.id FROM conversations c
+      JOIN conversation_members cm1 ON c.id = cm1.conversation_id AND cm1.user_id = $1
+      JOIN conversation_members cm2 ON c.id = cm2.conversation_id AND cm2.user_id = $2
+      WHERE c.type = 'private'
+    `, [req.user.id, m.user_id]);
+
+    let convId;
+    if (conv.rows.length > 0) {
+      convId = conv.rows[0].id;
+    } else {
+      const newConv = await query('INSERT INTO conversations (type, created_by) VALUES ($1, $2) RETURNING id', ['private', req.user.id]);
+      convId = newConv.rows[0].id;
+      await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, req.user.id, 'member']);
+      await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, m.user_id, 'member']);
+    }
+
+    await query('INSERT INTO messages (conversation_id, sender_id, content, type) VALUES ($1, $2, $3, $4)', [convId, req.user.id, content, type]);
+    sent++;
+  }
+
+  res.json({ sent, total: members.rows.length });
+});
+
+// Update broadcast
+router.put('/broadcasts/:id', authenticateToken, async (req, res) => {
+  const { name, member_ids } = req.body;
+  const broadcast = await query('SELECT * FROM broadcasts WHERE id = $1 AND creator_id = $2', [req.params.id, req.user.id]);
+  if (broadcast.rows.length === 0) return res.status(404).json({ error: 'Broadcast not found' });
+
+  if (name) await query('UPDATE broadcasts SET name = $1 WHERE id = $2', [name, req.params.id]);
+  if (member_ids) {
+    await query('DELETE FROM broadcast_members WHERE broadcast_id = $1', [req.params.id]);
+    for (const userId of member_ids) {
+      await query('INSERT INTO broadcast_members (broadcast_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.id, userId]);
+    }
+  }
+  res.json({ message: 'Updated' });
+});
+
+// Delete broadcast
+router.delete('/broadcasts/:id', authenticateToken, async (req, res) => {
+  await query('DELETE FROM broadcasts WHERE id = $1 AND creator_id = $2', [req.params.id, req.user.id]);
+  res.json({ message: 'Deleted' });
+});
+
+// ===== SEARCH MESSAGES WITHIN CHAT =====
+
+router.get('/conversations/:id/search', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const { q } = req.query;
+  if (!q) return res.json({ messages: [] });
+
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+  const result = await query(`
+    SELECT m.id, m.content, m.type, m.created_at, u.username as sender_name
+    FROM messages m JOIN users u ON m.sender_id = u.id
+    WHERE m.conversation_id = $1 AND m.content ILIKE $2 AND m.deleted = 0
+    ORDER BY m.created_at DESC LIMIT 30
+  `, [convId, '%' + q + '%']);
+
+  res.json({ messages: result.rows, count: result.rows.length });
 });
 
 module.exports = router;

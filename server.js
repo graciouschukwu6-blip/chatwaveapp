@@ -49,6 +49,10 @@ app.get('/app', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'app.html'));
 });
 
+app.get('/join/:code', (req, res) => {
+  res.sendFile(path.join(__dirname, 'views', 'join.html'));
+});
+
 const PORT = process.env.PORT || 3000;
 
 // Initialize DB then start server
