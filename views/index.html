@@ -64,6 +64,24 @@
         <p class="switch-text">Already have an account? <a href="#" id="showLogin">Sign In</a></p>
       </form>
 
+      <!-- Two-Step PIN Screen -->
+      <div id="pinForm" class="auth-form">
+        <h2>Enter PIN</h2>
+        <p style="text-align:center;color:var(--text-muted);font-size:13px;margin-bottom:24px;">Two-step verification is enabled.<br>Enter your 6-digit PIN to continue.</p>
+        <div class="pin-inputs" id="pinInputs" style="display:flex;gap:8px;justify-content:center;margin-bottom:24px;">
+          <input type="tel" maxlength="1" class="pin-box" autocomplete="off">
+          <input type="tel" maxlength="1" class="pin-box" autocomplete="off">
+          <input type="tel" maxlength="1" class="pin-box" autocomplete="off">
+          <input type="tel" maxlength="1" class="pin-box" autocomplete="off">
+          <input type="tel" maxlength="1" class="pin-box" autocomplete="off">
+          <input type="tel" maxlength="1" class="pin-box" autocomplete="off">
+        </div>
+        <button type="button" class="btn-primary" id="verifyPinBtn">
+          <span>Verify</span>
+        </button>
+        <p class="switch-text"><a href="#" id="backToLogin">&#8592; Back to login</a></p>
+      </div>
+
       <div id="errorMsg" class="error-msg"></div>
     </div>
 

@@ -103,6 +103,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Check if two-step verification is enabled
+    if (user.two_step_pin) {
+      // Don't issue token yet — require PIN verification
+      const tempToken = jwt.sign({ userId: user.id, twoStep: true }, process.env.JWT_SECRET, { expiresIn: '5m' });
+      return res.json({ requires_pin: true, temp_token: tempToken });
+    }
+
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
@@ -170,6 +177,84 @@ router.get('/users/:id', authenticateToken, async (req, res) => {
   const result = await query('SELECT id, username, chat_number, avatar, bio, status_message, status, last_seen, created_at FROM users WHERE id = $1', [req.params.id]);
   if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
   res.json({ user: result.rows[0] });
+});
+
+// ===== TWO-STEP VERIFICATION =====
+
+// Verify PIN during login
+router.post('/two-step/verify', async (req, res) => {
+  try {
+    const { pin, temp_token } = req.body;
+    if (!pin || !temp_token) return res.status(400).json({ error: 'PIN and token required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(temp_token, process.env.JWT_SECRET);
+    } catch(e) {
+      return res.status(401).json({ error: 'Session expired. Please login again.' });
+    }
+
+    if (!decoded.twoStep) return res.status(400).json({ error: 'Invalid token' });
+
+    const result = await query('SELECT id, username, email, chat_number, avatar, bio, status_message, two_step_pin FROM users WHERE id = $1', [decoded.userId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const user = result.rows[0];
+    const pinMatch = await bcrypt.compare(pin, user.two_step_pin);
+    if (!pinMatch) return res.status(401).json({ error: 'Incorrect PIN' });
+
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.json({
+      message: 'Login successful',
+      user: { id: user.id, username: user.username, email: user.email, chat_number: user.chat_number, avatar: user.avatar, bio: user.bio || '', status_message: user.status_message || '' },
+      token
+    });
+  } catch(err) {
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+});
+
+// Enable two-step verification
+router.post('/two-step/enable', authenticateToken, async (req, res) => {
+  try {
+    const { pin, email } = req.body;
+    if (!pin || pin.length !== 6 || !/^\d{6}$/.test(pin)) {
+      return res.status(400).json({ error: 'PIN must be exactly 6 digits' });
+    }
+
+    const hashedPin = await bcrypt.hash(pin, 12);
+    await query('UPDATE users SET two_step_pin = $1, two_step_email = $2 WHERE id = $3', [hashedPin, email || null, req.user.id]);
+    res.json({ message: 'Two-step verification enabled', enabled: true });
+  } catch(err) {
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+});
+
+// Disable two-step verification
+router.post('/two-step/disable', authenticateToken, async (req, res) => {
+  try {
+    const { pin } = req.body;
+    if (!pin) return res.status(400).json({ error: 'Current PIN required' });
+
+    const result = await query('SELECT two_step_pin FROM users WHERE id = $1', [req.user.id]);
+    if (!result.rows[0].two_step_pin) return res.status(400).json({ error: 'Two-step not enabled' });
+
+    const match = await bcrypt.compare(pin, result.rows[0].two_step_pin);
+    if (!match) return res.status(401).json({ error: 'Incorrect PIN' });
+
+    await query('UPDATE users SET two_step_pin = NULL, two_step_email = NULL WHERE id = $1', [req.user.id]);
+    res.json({ message: 'Two-step verification disabled', enabled: false });
+  } catch(err) {
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+});
+
+// Get two-step status
+router.get('/two-step/status', authenticateToken, async (req, res) => {
+  const result = await query('SELECT two_step_pin, two_step_email FROM users WHERE id = $1', [req.user.id]);
+  const user = result.rows[0];
+  res.json({ enabled: !!user.two_step_pin, email: user.two_step_email || '' });
 });
 
 module.exports = router;

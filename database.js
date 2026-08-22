@@ -167,6 +167,58 @@ async function initDb() {
       user_id INTEGER NOT NULL REFERENCES users(id),
       UNIQUE(broadcast_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS communities (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT NULL,
+      creator_id INTEGER NOT NULL REFERENCES users(id),
+      avatar TEXT DEFAULT NULL,
+      invite_code TEXT UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS community_members (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      role TEXT DEFAULT 'member',
+      joined_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(community_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS community_groups (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      UNIQUE(community_id, conversation_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS communities (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT NULL,
+      creator_id INTEGER NOT NULL REFERENCES users(id),
+      avatar TEXT DEFAULT NULL,
+      invite_code TEXT UNIQUE DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS community_members (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      role TEXT DEFAULT 'member',
+      joined_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(community_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS community_groups (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      UNIQUE(community_id, conversation_id)
+    );
   `);
 
   // Add columns if they don't exist (safe migration for existing DBs)
@@ -178,7 +230,11 @@ async function initDb() {
     `ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NULL`,
     `ALTER TABLE messages ADD COLUMN IF NOT EXISTS link_preview JSONB DEFAULT NULL`
     ,`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS invite_code TEXT DEFAULT NULL`,
-    `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS description TEXT DEFAULT NULL`
+    `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS description TEXT DEFAULT NULL`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_pin TEXT DEFAULT NULL`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_email TEXT DEFAULT NULL`
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_pin TEXT DEFAULT NULL`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_email TEXT DEFAULT NULL`
   ];
 
   for (const m of migrations) {

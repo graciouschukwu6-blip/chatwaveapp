@@ -61,6 +61,15 @@ function setupSocket(io) {
           }
         }
 
+        // Check if channel - only admins can send
+        if (conv && conv.type === 'channel') {
+          const roleResult = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [conversation_id, user.id]);
+          if (!roleResult.rows[0] || roleResult.rows[0].role === 'subscriber') {
+            socket.emit('error_message', { error: 'Only admins can send messages in channels.' });
+            return;
+          }
+        }
+
         // Check @everyone permission
         if (content && content.includes('@everyone')) {
           const roleResult = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [conversation_id, user.id]);

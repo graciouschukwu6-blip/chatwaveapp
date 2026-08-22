@@ -39,6 +39,8 @@ setupSocket(io);
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/chat', require('./routes/chat'));
 app.use('/api/status', require('./routes/status'));
+app.use('/api/chat/channels', require('./routes/channels'));
+app.use('/api/communities', require('./routes/communities'));
 
 // Serve the app
 app.get('/', (req, res) => {

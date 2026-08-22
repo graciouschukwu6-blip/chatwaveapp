@@ -294,3 +294,25 @@ body::before {
   .auth-card { padding: 36px 24px; border-radius: 10px; }
   .container { padding: 16px; }
 }
+
+/* PIN Input Boxes */
+.pin-box {
+  width: 44px;
+  height: 52px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+  -webkit-text-security: disc;
+  text-security: disc;
+}
+
+.pin-box:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0,168,132,0.15);
+}

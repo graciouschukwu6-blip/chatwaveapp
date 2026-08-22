@@ -15,7 +15,240 @@ const storage = multer.diskStorage({
     cb(null, uniqueName);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+
+// ===== CHAT EXPORT =====
+
+router.get('/conversations/:id/export', authenticateToken, async (req, res) => {
+  try {
+    const convId = req.params.id;
+    const withMedia = req.query.media === 'true';
+
+    const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+    const conv = await query('SELECT name, type FROM conversations WHERE id = $1', [convId]);
+    const convName = conv.rows[0].name || 'Chat';
+
+    const messages = await query(`
+      SELECT m.content, m.type, m.file_url, m.file_name, m.created_at, u.username
+      FROM messages m JOIN users u ON m.sender_id = u.id
+      WHERE m.conversation_id = $1 AND m.deleted = 0
+      ORDER BY m.created_at ASC
+    `, [convId]);
+
+    let exportText = `ChatWave - Chat Export: ${convName}\nExported: ${new Date().toLocaleString()}\n${'='.repeat(50)}\n\n`;
+
+    for (const msg of messages.rows) {
+      const date = new Date(msg.created_at);
+      const dateStr = `[${date.toLocaleDateString('en-GB')}, ${date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}]`;
+
+      if (msg.type === 'text') {
+        exportText += `${dateStr} ${msg.username}: ${msg.content}\n`;
+      } else if (msg.type === 'image') {
+        exportText += `${dateStr} ${msg.username}: <image>${withMedia && msg.file_url ? ' ' + msg.file_url : ''} ${msg.file_name || ''}\n`;
+      } else if (msg.type === 'video') {
+        exportText += `${dateStr} ${msg.username}: <video>${withMedia && msg.file_url ? ' ' + msg.file_url : ''} ${msg.file_name || ''}\n`;
+      } else if (msg.type === 'file') {
+        exportText += `${dateStr} ${msg.username}: <file>${withMedia && msg.file_url ? ' ' + msg.file_url : ''} ${msg.file_name || ''}\n`;
+      } else if (msg.type === 'voice') {
+        exportText += `${dateStr} ${msg.username}: <voice message>${withMedia && msg.file_url ? ' ' + msg.file_url : ''}\n`;
+      } else if (msg.type === 'gif') {
+        exportText += `${dateStr} ${msg.username}: <GIF> ${msg.content || ''}\n`;
+      } else if (msg.type === 'poll') {
+        exportText += `${dateStr} ${msg.username}: <poll>\n`;
+      } else if (msg.type === 'system') {
+        exportText += `${dateStr} ~ ${msg.content}\n`;
+      } else {
+        exportText += `${dateStr} ${msg.username}: ${msg.content || ''}\n`;
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="ChatWave_${convName.replace(/[^a-z0-9]/gi, '_')}_export.txt"`);
+    res.send(exportText);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== CHANNELS =====
+
+// Create channel
+router.post('/channels', authenticateToken, async (req, res) => {
+  const { name, description, is_public } = req.body;
+  if (!name) return res.status(400).json({ error: 'Channel name required' });
+
+  const inviteCode = crypto.randomBytes(4).toString('hex');
+  const conv = await query(
+    'INSERT INTO conversations (type, name, description, created_by, invite_code) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+    ['channel', name, description || null, req.user.id, inviteCode]
+  );
+  const convId = conv.rows[0].id;
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, req.user.id, 'admin']);
+  res.status(201).json({ conversation_id: convId, name, invite_code: inviteCode });
+});
+
+// List public channels (for discovery)
+router.get('/channels', authenticateToken, async (req, res) => {
+  const result = await query(`
+    SELECT c.id, c.name, c.description, c.group_avatar,
+      (SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id) as subscriber_count
+    FROM conversations c WHERE c.type = 'channel'
+    ORDER BY subscriber_count DESC
+  `);
+  res.json({ channels: result.rows });
+});
+
+// Subscribe to channel
+router.post('/channels/:id/subscribe', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const conv = await query('SELECT id, type FROM conversations WHERE id = $1 AND type = $2', [convId, 'channel']);
+  if (conv.rows.length === 0) return res.status(404).json({ error: 'Channel not found' });
+
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [convId, req.user.id, 'subscriber']);
+  res.json({ subscribed: true });
+});
+
+// Unsubscribe from channel
+router.post('/channels/:id/unsubscribe', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  // Don't allow admins to unsubscribe (they must transfer ownership first)
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length > 0 && member.rows[0].role === 'admin') return res.status(403).json({ error: 'Admins cannot unsubscribe. Transfer ownership first.' });
+
+  await query('DELETE FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  res.json({ subscribed: false });
+});
+
+// ===== COMMUNITIES =====
+
+// Create community
+router.post('/communities', authenticateToken, async (req, res) => {
+  const { name, description } = req.body;
+  if (!name) return res.status(400).json({ error: 'Community name required' });
+
+  const inviteCode = crypto.randomBytes(4).toString('hex');
+  const result = await query(
+    'INSERT INTO communities (name, description, creator_id, invite_code) VALUES ($1, $2, $3, $4) RETURNING id',
+    [name, description || null, req.user.id, inviteCode]
+  );
+  const communityId = result.rows[0].id;
+
+  // Add creator as admin
+  await query('INSERT INTO community_members (community_id, user_id, role) VALUES ($1, $2, $3)', [communityId, req.user.id, 'admin']);
+
+  // Auto-create Announcements group (admin-only posting)
+  const announcementCode = crypto.randomBytes(4).toString('hex');
+  const announcementGroup = await query(
+    'INSERT INTO conversations (type, name, created_by, invite_code, locked) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+    ['group', name + ' - Announcements', req.user.id, announcementCode, 1]
+  );
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [announcementGroup.rows[0].id, req.user.id, 'admin']);
+  await query('INSERT INTO community_groups (community_id, conversation_id) VALUES ($1, $2)', [communityId, announcementGroup.rows[0].id]);
+
+  res.status(201).json({ id: communityId, name, invite_code: inviteCode });
+});
+
+// List user's communities
+router.get('/communities', authenticateToken, async (req, res) => {
+  const result = await query(`
+    SELECT com.*,
+      (SELECT COUNT(*) FROM community_members WHERE community_id = com.id) as member_count,
+      (SELECT COUNT(*) FROM community_groups WHERE community_id = com.id) as group_count
+    FROM communities com
+    JOIN community_members cmem ON com.id = cmem.community_id AND cmem.user_id = $1
+    ORDER BY com.created_at DESC
+  `, [req.user.id]);
+  res.json({ communities: result.rows });
+});
+
+// Get community details
+router.get('/communities/:id', authenticateToken, async (req, res) => {
+  const comId = req.params.id;
+  const member = await query('SELECT role FROM community_members WHERE community_id = $1 AND user_id = $2', [comId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a community member' });
+
+  const community = await query('SELECT * FROM communities WHERE id = $1', [comId]);
+  if (community.rows.length === 0) return res.status(404).json({ error: 'Community not found' });
+
+  const groups = await query(`
+    SELECT c.id, c.name, c.group_avatar, c.locked,
+      (SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id) as member_count
+    FROM community_groups cg JOIN conversations c ON cg.conversation_id = c.id
+    WHERE cg.community_id = $1 ORDER BY c.name
+  `, [comId]);
+
+  const members = await query(`
+    SELECT u.id, u.username, u.avatar, u.chat_number, cmem.role
+    FROM community_members cmem JOIN users u ON cmem.user_id = u.id
+    WHERE cmem.community_id = $1 ORDER BY cmem.role DESC, u.username
+  `, [comId]);
+
+  res.json({ community: community.rows[0], groups: groups.rows, members: members.rows, my_role: member.rows[0].role });
+});
+
+// Add group to community (or create new one)
+router.post('/communities/:id/groups', authenticateToken, async (req, res) => {
+  const comId = req.params.id;
+  const member = await query('SELECT role FROM community_members WHERE community_id = $1 AND user_id = $2', [comId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can manage groups' });
+
+  const { conversation_id, name } = req.body;
+
+  if (conversation_id) {
+    // Link existing group
+    await query('INSERT INTO community_groups (community_id, conversation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [comId, conversation_id]);
+    res.json({ linked: true });
+  } else if (name) {
+    // Create new group under community
+    const inviteCode = crypto.randomBytes(4).toString('hex');
+    const conv = await query('INSERT INTO conversations (type, name, created_by, invite_code) VALUES ($1, $2, $3, $4) RETURNING id', ['group', name, req.user.id, inviteCode]);
+    const convId = conv.rows[0].id;
+    await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, req.user.id, 'admin']);
+    await query('INSERT INTO community_groups (community_id, conversation_id) VALUES ($1, $2)', [comId, convId]);
+
+    // Add all community members to the new group
+    const comMembers = await query('SELECT user_id FROM community_members WHERE community_id = $1 AND user_id != $2', [comId, req.user.id]);
+    for (const m of comMembers.rows) {
+      await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [convId, m.user_id, 'member']);
+    }
+
+    res.status(201).json({ conversation_id: convId, name });
+  } else {
+    res.status(400).json({ error: 'Provide conversation_id or name' });
+  }
+});
+
+// Join community via invite code
+router.post('/communities/:code/join', authenticateToken, async (req, res) => {
+  const { code } = req.params;
+  const community = await query('SELECT id, name FROM communities WHERE invite_code = $1', [code]);
+  if (community.rows.length === 0) return res.status(404).json({ error: 'Invalid community invite' });
+
+  const comId = community.rows[0].id;
+  await query('INSERT INTO community_members (community_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [comId, req.user.id, 'member']);
+
+  // Add user to all community groups
+  const groups = await query('SELECT conversation_id FROM community_groups WHERE community_id = $1', [comId]);
+  for (const g of groups.rows) {
+    await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [g.conversation_id, req.user.id, 'member']);
+  }
+
+  res.json({ joined: true, community: community.rows[0] });
+});
+
+// Update community
+router.put('/communities/:id', authenticateToken, async (req, res) => {
+  const comId = req.params.id;
+  const member = await query('SELECT role FROM community_members WHERE community_id = $1 AND user_id = $2', [comId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can update community' });
+
+  const { name, description } = req.body;
+  if (name) await query('UPDATE communities SET name = $1 WHERE id = $2', [name, comId]);
+  if (description !== undefined) await query('UPDATE communities SET description = $1 WHERE id = $2', [description, comId]);
+  res.json({ updated: true });
+});
+
 
 const voiceStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '../public/uploads/voice')),
@@ -249,7 +482,7 @@ router.get('/conversations/:id/members', authenticateToken, async (req, res) => 
 router.get('/conversations', authenticateToken, async (req, res) => {
   const result = await query(`
     SELECT c.*,
-      cm.archived, cm.muted_until, cm.wallpaper,
+      cm.archived, cm.muted_until, cm.wallpaper, cm.role as my_role,
       CASE WHEN c.type = 'private' THEN (
         SELECT u.username FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $1
       ) ELSE c.name END as display_name,
@@ -709,6 +942,60 @@ router.get('/conversations/:id/search', authenticateToken, async (req, res) => {
   `, [convId, '%' + q + '%']);
 
   res.json({ messages: result.rows, count: result.rows.length });
+});
+
+// ===== CHAT EXPORT =====
+
+router.get('/conversations/:id/export', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const withMedia = req.query.media === 'true';
+
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+  const conv = await query('SELECT name, type FROM conversations WHERE id = $1', [convId]);
+  const chatName = conv.rows[0].name || 'Private Chat';
+
+  const msgs = await query(`
+    SELECT m.content, m.type, m.file_url, m.file_name, m.created_at, m.deleted,
+           u.username as sender_name
+    FROM messages m JOIN users u ON m.sender_id = u.id
+    WHERE m.conversation_id = $1
+    ORDER BY m.created_at ASC
+  `, [convId]);
+
+  let output = `ChatWave - Chat Export: ${chatName}\nExported: ${new Date().toLocaleString()}\n${'='.repeat(50)}\n\n`;
+
+  for (const msg of msgs.rows) {
+    const date = new Date(msg.created_at);
+    const dateStr = `[${date.toLocaleDateString('en-GB')}, ${date.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})}]`;
+
+    if (msg.deleted) {
+      output += `${dateStr} ${msg.sender_name}: <message deleted>\n`;
+    } else if (msg.type === 'system') {
+      output += `${dateStr} ~ ${msg.content}\n`;
+    } else if (msg.type === 'image') {
+      output += `${dateStr} ${msg.sender_name}: <image>${withMedia && msg.file_url ? ' ' + msg.file_url : ''}\n`;
+    } else if (msg.type === 'video') {
+      output += `${dateStr} ${msg.sender_name}: <video>${withMedia && msg.file_url ? ' ' + msg.file_url : ''}\n`;
+    } else if (msg.type === 'file') {
+      output += `${dateStr} ${msg.sender_name}: <file> ${msg.file_name || 'document'}${withMedia && msg.file_url ? ' ' + msg.file_url : ''}\n`;
+    } else if (msg.type === 'voice') {
+      output += `${dateStr} ${msg.sender_name}: <voice message>${withMedia && msg.file_url ? ' ' + msg.file_url : ''}\n`;
+    } else if (msg.type === 'gif') {
+      output += `${dateStr} ${msg.sender_name}: <GIF>${withMedia ? ' ' + msg.content : ''}\n`;
+    } else if (msg.type === 'sticker') {
+      output += `${dateStr} ${msg.sender_name}: <sticker> ${msg.content}\n`;
+    } else if (msg.type === 'poll') {
+      output += `${dateStr} ${msg.sender_name}: <poll> ${msg.content}\n`;
+    } else {
+      output += `${dateStr} ${msg.sender_name}: ${msg.content || ''}\n`;
+    }
+  }
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ChatWave_${chatName.replace(/[^a-zA-Z0-9]/g,'_')}_export.txt"`);
+  res.send(output);
 });
 
 module.exports = router;

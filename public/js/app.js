@@ -1054,6 +1054,7 @@ async function openProfileModal() {
     av.textContent = '';
   }
   await loadBlockedUsers();
+  loadTwoStepStatus();
   showModal('profileModal');
 }
 
@@ -1186,6 +1187,7 @@ async function showChatInfo() {
   commonHtml += '<button class="btn-info-action" onclick="archiveConversation(' + currentConversation.id + ')">&#128451; ' + (currentConversation.archived ? 'Unarchive' : 'Archive') + ' Chat</button>';
   commonHtml += '<button class="btn-info-action" onclick="openMuteModal()">&#128263; Mute Notifications</button>';
   commonHtml += '<button class="btn-info-action" onclick="showWallpaperPicker()">&#127912; Chat Wallpaper</button>';
+  commonHtml += '<button class="btn-info-action" onclick="exportChat()">&#128228; Export Chat</button>';
   var timerVal = currentConversation.disappearing_timer || 0;
   var timerLabel = timerVal === 0 ? 'Off' : (timerVal === 86400 ? '24 hours' : (timerVal === 604800 ? '7 days' : '90 days'));
   commonHtml += '<div class="info-disappearing"><span style="font-size:13px;">&#9201; Disappearing messages: <strong>' + timerLabel + '</strong></span>';
@@ -3012,3 +3014,281 @@ if (document.readyState !== 'loading') {
   initBroadcastCreate();
   loadBroadcasts();
 }
+
+// ===== CHAT EXPORT =====
+
+function exportChat() {
+  if (!currentConversation) return;
+  var withMedia = confirm('Include media links?\n\nOK = With media links\nCancel = Text only');
+  var url = '/api/chat/conversations/' + currentConversation.id + '/export?format=txt' + (withMedia ? '&media=true' : '');
+
+  fetch(url, { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(res) { return res.blob(); })
+    .then(function(blob) {
+      var blobUrl = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = 'ChatWave_export.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    });
+}
+
+// ===== TWO-STEP VERIFICATION =====
+
+function loadTwoStepStatus() {
+  fetch('/api/auth/two-step/status', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var section = document.getElementById('twoStepSection');
+      if (!section) return;
+
+      if (data.enabled) {
+        section.innerHTML = '<p style="color:var(--accent);font-size:13px;margin-bottom:12px;">✅ Two-step verification is enabled</p>' +
+          (data.email ? '<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Backup: ' + data.email + '</p>' : '') +
+          '<button class="btn-danger" onclick="disableTwoStep()">Disable</button>';
+      } else {
+        section.innerHTML = '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Add a 6-digit PIN for extra security</p>' +
+          '<div class="input-group"><label>6-Digit PIN</label><input type="tel" id="twoStepPinInput" maxlength="6" placeholder="000000" style="letter-spacing:8px;text-align:center;font-size:20px;"></div>' +
+          '<div class="input-group"><label>Backup Email (optional)</label><input type="email" id="twoStepEmailInput" placeholder="your@email.com"></div>' +
+          '<button class="btn-primary" onclick="enableTwoStep()">Enable</button>';
+      }
+    }).catch(function() {});
+}
+
+function enableTwoStep() {
+  var pinInput = document.getElementById('twoStepPinInput');
+  var emailInput = document.getElementById('twoStepEmailInput');
+  var pin = pinInput ? pinInput.value : '';
+
+  if (!/^\d{6}$/.test(pin)) { alert('PIN must be exactly 6 digits'); return; }
+
+  fetch('/api/auth/two-step/enable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ pin: pin, email: emailInput ? emailInput.value : '' })
+  }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.enabled) {
+        alert('Two-step verification enabled!');
+        loadTwoStepStatus();
+      } else {
+        alert(data.error || 'Failed');
+      }
+    });
+}
+
+function disableTwoStep() {
+  var pin = prompt('Enter your current 6-digit PIN to disable:');
+  if (!pin) return;
+
+  fetch('/api/auth/two-step/disable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ pin: pin })
+  }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.message) {
+        alert('Two-step verification disabled');
+        loadTwoStepStatus();
+      } else {
+        alert(data.error || 'Failed');
+      }
+    });
+}
+
+// ===== CHANNELS =====
+
+async function createChannel() {
+  var nameInput = document.getElementById('channelNameInput');
+  var descInput = document.getElementById('channelDescInput');
+  if (!nameInput || !nameInput.value.trim()) return;
+
+  try {
+    var res = await fetch('/api/chat/channels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ name: nameInput.value.trim(), description: descInput ? descInput.value.trim() : '', is_public: true })
+    });
+    var data = await res.json();
+    if (res.ok) {
+      nameInput.value = '';
+      if (descInput) descInput.value = '';
+      hideModal('newChatModal');
+      loadConversations();
+    } else {
+      alert(data.error || 'Failed to create channel');
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function discoverChannels() {
+  try {
+    var res = await fetch('/api/chat/channels', { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    var list = document.getElementById('channelsDiscoverList');
+    if (!list) return;
+    if (!data.channels || data.channels.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">No channels available</p>';
+    } else {
+      list.innerHTML = data.channels.map(function(ch) {
+        return '<div class="conversation-item" onclick="subscribeChannel(' + ch.id + ')" style="border-radius:8px;margin-bottom:4px;">' +
+          '<div class="conv-avatar" style="background:var(--accent);font-size:20px;">&#128226;</div>' +
+          '<div class="conv-info"><span class="conv-name">' + escapeHtml(ch.name) + '</span>' +
+          '<span class="conv-last-msg">' + (ch.subscriber_count || 0) + ' subscribers</span></div></div>';
+      }).join('');
+    }
+    showModal('channelsDiscoverModal');
+  } catch(e) { console.error(e); }
+}
+
+async function subscribeChannel(channelId) {
+  try {
+    await fetch('/api/chat/channels/' + channelId + '/subscribe', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    hideModal('channelsDiscoverModal');
+    loadConversations();
+  } catch(e) { console.error(e); }
+}
+
+// ===== COMMUNITIES =====
+
+async function createCommunity() {
+  var nameInput = document.getElementById('communityNameInput');
+  var descInput = document.getElementById('communityDescInput');
+  if (!nameInput || !nameInput.value.trim()) return;
+
+  try {
+    var res = await fetch('/api/communities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ name: nameInput.value.trim(), description: descInput ? descInput.value.trim() : '' })
+    });
+    var data = await res.json();
+    if (res.ok) {
+      nameInput.value = '';
+      if (descInput) descInput.value = '';
+      hideModal('createCommunityModal');
+      loadCommunities();
+    } else {
+      alert(data.error || 'Failed to create community');
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function loadCommunities() {
+  try {
+    var res = await fetch('/api/communities', { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    var list = document.getElementById('communitiesList');
+    if (!list) return;
+    if (!data.communities || data.communities.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px;">No communities yet</p>';
+      return;
+    }
+    list.innerHTML = data.communities.map(function(c) {
+      return '<div class="conversation-item" onclick="openCommunityDetail(' + c.id + ')" style="border-radius:8px;margin-bottom:4px;">' +
+        '<div class="conv-avatar" style="background:var(--accent);font-size:20px;">&#127983;</div>' +
+        '<div class="conv-info"><span class="conv-name">' + escapeHtml(c.name) + '</span>' +
+        '<span class="conv-last-msg">' + (c.group_count || 0) + ' groups &middot; ' + (c.member_count || 0) + ' members</span></div></div>';
+    }).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function openCommunityDetail(communityId) {
+  try {
+    var res = await fetch('/api/communities/' + communityId, { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    if (!res.ok) return;
+
+    document.getElementById('communityDetailName').textContent = data.community.name;
+    var descEl = document.getElementById('communityDetailDesc');
+    if (descEl) descEl.textContent = data.community.description || '';
+    var invCodeEl = document.getElementById('communityInviteCode');
+    if (invCodeEl) invCodeEl.textContent = window.location.origin + '/api/communities/join/' + (data.community.invite_code || '');
+    var memberCountEl = document.getElementById('communityMemberCount');
+    if (memberCountEl) memberCountEl.textContent = data.members.length;
+
+    var groupsList = document.getElementById('communityGroupsList');
+    if (groupsList) {
+      groupsList.innerHTML = data.groups.map(function(g) {
+        return '<div class="conversation-item" onclick="openConversation(' + g.id + ');hideModal(\'communityDetailModal\')" style="border-radius:8px;margin-bottom:4px;padding:8px 12px;">' +
+          '<div class="conv-avatar" style="width:36px;height:36px;font-size:14px;background:var(--surface);">' + (g.locked ? '&#128226;' : '&#128101;') + '</div>' +
+          '<div class="conv-info"><span class="conv-name" style="font-size:13px;">' + escapeHtml(g.name) + '</span>' +
+          '<span class="conv-last-msg">' + (g.member_count || 0) + ' members</span></div></div>';
+      }).join('');
+    }
+
+    var membersList = document.getElementById('communityMembersList');
+    if (membersList) {
+      membersList.innerHTML = data.members.map(function(m) {
+        return '<div class="member-item"><span class="member-name">' + escapeHtml(m.username) + '</span>' +
+          (m.role === 'admin' ? '<span class="member-role">Admin</span>' : '') + '</div>';
+      }).join('');
+    }
+
+    // Copy invite button
+    var copyBtn = document.getElementById('copyCommunityInvite');
+    if (copyBtn) {
+      copyBtn.onclick = function() {
+        var url = window.location.origin + '/api/communities/join/' + (data.community.invite_code || '');
+        if (navigator.clipboard) { navigator.clipboard.writeText(url); }
+        else { var t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
+        alert('Invite link copied!');
+      };
+    }
+
+    // Store community ID for add group
+    var addBtn = document.getElementById('addCommunityGroupBtn');
+    if (addBtn) addBtn.dataset.communityId = communityId;
+
+    showModal('communityDetailModal');
+  } catch(e) { console.error(e); }
+}
+
+async function addCommunityGroup() {
+  var nameInput = document.getElementById('newCommunityGroupName');
+  var addBtn = document.getElementById('addCommunityGroupBtn');
+  var communityId = addBtn ? addBtn.dataset.communityId : null;
+  if (!nameInput || !nameInput.value.trim() || !communityId) return;
+
+  try {
+    await fetch('/api/communities/' + communityId + '/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ name: nameInput.value.trim() })
+    });
+    nameInput.value = '';
+    openCommunityDetail(parseInt(communityId));
+    loadConversations();
+  } catch(e) { console.error(e); }
+}
+
+// ===== PHASE 4 EVENT LISTENERS =====
+
+(function initPhase4() {
+  var createChannelBtn = document.getElementById('createChannelBtn');
+  if (createChannelBtn) createChannelBtn.addEventListener('click', createChannel);
+
+  var discoverBtn = document.getElementById('discoverChannelsBtn');
+  if (discoverBtn) discoverBtn.addEventListener('click', discoverChannels);
+
+  var closeChDiscover = document.getElementById('closeChannelsDiscover');
+  if (closeChDiscover) closeChDiscover.addEventListener('click', function() { hideModal('channelsDiscoverModal'); });
+
+  var createCommunityBtn = document.getElementById('createCommunityBtn');
+  if (createCommunityBtn) createCommunityBtn.addEventListener('click', createCommunity);
+
+  var communitiesBtn = document.getElementById('communitiesBtn');
+  if (communitiesBtn) communitiesBtn.addEventListener('click', function() { loadCommunities(); showModal('communitiesModal'); });
+
+  var closeCommunityDetail = document.getElementById('closeCommunityDetail');
+  if (closeCommunityDetail) closeCommunityDetail.addEventListener('click', function() { hideModal('communityDetailModal'); });
+
+  var addGroupBtn = document.getElementById('addCommunityGroupBtn');
+  if (addGroupBtn) addGroupBtn.addEventListener('click', addCommunityGroup);
+})();
