@@ -245,8 +245,6 @@ async function initDb() {
     `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS description TEXT DEFAULT NULL`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_pin TEXT DEFAULT NULL`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_email TEXT DEFAULT NULL`
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_pin TEXT DEFAULT NULL`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_step_email TEXT DEFAULT NULL`
   ];
 
   for (const m of migrations) {
