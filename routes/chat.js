@@ -15,6 +15,7 @@ const storage = multer.diskStorage({
     cb(null, uniqueName);
   }
 });
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // ===== CHAT EXPORT =====
 
