@@ -1944,4 +1944,19 @@ function formatStatusTime(dateStr) {
 })();
 
 // ===== START =====
-init();
+// Validate token before initializing
+if (token && currentUser) {
+  fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(res) {
+      if (res.ok) {
+        init();
+      } else {
+        localStorage.clear();
+        window.location.href = '/';
+      }
+    })
+    .catch(function() {
+      localStorage.clear();
+      window.location.href = '/';
+    });
+}
