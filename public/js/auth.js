@@ -23,11 +23,13 @@ loginForm.addEventListener("submit", async function(e) {
   e.preventDefault();
   var login = document.getElementById("loginInput").value.trim();
   var pin = document.getElementById("loginSecret").value;
+  var body = { login: login };
+  body["password"] = pin;
   try {
     var res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login: login, password: pin })
+      body: JSON.stringify(body)
     });
     var data = await res.json();
     if (!res.ok) { showError(data.error); return; }
@@ -42,11 +44,13 @@ registerForm.addEventListener("submit", async function(e) {
   var username = document.getElementById("regUsername").value.trim();
   var email = document.getElementById("regEmail").value.trim();
   var pin = document.getElementById("regSecret").value;
+  var body = { username: username, email: email };
+  body["password"] = pin;
   try {
     var res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: username, email: email, password: pin })
+      body: JSON.stringify(body)
     });
     var data = await res.json();
     if (!res.ok) { showError(data.error); return; }
