@@ -90,6 +90,7 @@
 
         <div class="message-input-area">
           <button class="icon-btn attach-btn" id="attachBtn" title="Attach file">&#128206;</button>
+          <button class="icon-btn emoji-panel-btn" id="emojiPanelBtn" title="Emoji, GIFs & Stickers">&#128522;</button>
           <button class="icon-btn poll-btn" id="pollBtn" title="Create poll">&#128202;</button>
           <button class="icon-btn view-once-toggle" id="viewOnceToggle" title="Toggle view once">&#9865;</button>
           <button class="icon-btn voice-btn" id="voiceBtn" title="Voice note">&#127908;</button>
@@ -255,6 +256,44 @@
     <button class="ctx-btn" data-action="forward">&#8618; Forward</button>
     <button class="ctx-btn" data-action="pin">&#128204; Pin</button>
     <button class="ctx-btn" data-action="delete">&#128465; Delete</button>
+  </div>
+
+  <!-- Emoji/GIF/Sticker Panel -->
+  <div class="expression-panel" id="expressionPanel" style="display:none;">
+    <div class="expression-panel-tabs">
+      <button class="expression-tab active" data-tab="emoji">&#128522; Emoji</button>
+      <button class="expression-tab" data-tab="gif">GIF</button>
+      <button class="expression-tab" data-tab="stickers">&#127912; Stickers</button>
+    </div>
+    <div class="expression-search">
+      <input type="text" id="expressionSearch" placeholder="Search emoji..." autocomplete="off">
+    </div>
+    <div class="expression-content">
+      <div class="expression-tab-content active" id="emojiTabContent">
+        <div class="emoji-categories" id="emojiCategories"></div>
+        <div class="emoji-full-grid" id="emojiFullGrid"></div>
+      </div>
+      <div class="expression-tab-content" id="gifTabContent" style="display:none;">
+        <div class="gif-grid" id="gifGrid"></div>
+        <div class="gif-loading" id="gifLoading" style="display:none;">Loading...</div>
+      </div>
+      <div class="expression-tab-content" id="stickersTabContent" style="display:none;">
+        <div class="sticker-grid" id="stickerGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wallpaper Picker Modal -->
+  <div class="modal" id="wallpaperModal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>&#127912; Chat Wallpaper</h3>
+        <button class="close-modal" id="closeWallpaper">&#10005;</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Choose a wallpaper for this chat</p>
+      <div class="wallpaper-grid" id="wallpaperGrid"></div>
+      <button class="btn-danger" id="resetWallpaperBtn" style="margin-top:12px;">Reset to Default</button>
+    </div>
   </div>
 
   <!-- Emoji Picker -->

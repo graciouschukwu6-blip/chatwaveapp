@@ -158,6 +158,7 @@ async function initDb() {
     `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS disappearing_timer INTEGER DEFAULT 0`,
     `ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE`,
     `ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP DEFAULT NULL`,
+    `ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS wallpaper TEXT DEFAULT NULL`,
     `ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NULL`,
     `ALTER TABLE messages ADD COLUMN IF NOT EXISTS link_preview JSONB DEFAULT NULL`
   ];

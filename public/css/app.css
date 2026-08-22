@@ -1387,3 +1387,226 @@ body {
   font-size: 14px; outline: none; transition: all 0.2s;
 }
 .poll-option-input:focus { border-color: var(--accent); }
+
+/* ===== EXPRESSION PANEL (Emoji / GIF / Stickers) ===== */
+.expression-panel {
+  position: fixed;
+  bottom: 62px;
+  left: 372px;
+  right: 12px;
+  height: 320px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.25);
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.expression-panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.expression-tab {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.expression-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.expression-search {
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.expression-search input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: none;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.expression-search input::placeholder { color: var(--text-muted); }
+
+.expression-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.expression-tab-content {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.emoji-categories {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.emoji-categories::-webkit-scrollbar { display: none; }
+
+.emoji-cat-btn {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.emoji-cat-btn:hover { background: var(--surface-hover); }
+.emoji-cat-btn.active { background: var(--surface-active); }
+
+.emoji-full-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.emoji-full-grid button {
+  width: 100%;
+  aspect-ratio: 1;
+  border: none;
+  background: none;
+  font-size: 22px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.emoji-full-grid button:hover {
+  background: var(--surface-hover);
+  transform: scale(1.15);
+}
+
+.emoji-section-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 4px 4px;
+  font-weight: 600;
+  grid-column: 1 / -1;
+}
+
+/* GIF Grid */
+.gif-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.gif-grid img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.gif-grid img:hover { transform: scale(1.03); }
+
+.gif-loading {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Sticker Grid */
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.sticker-grid .sticker-item {
+  font-size: 40px;
+  text-align: center;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+.sticker-grid .sticker-item:hover {
+  background: var(--surface-hover);
+  transform: scale(1.1);
+}
+
+/* ===== WALLPAPER PICKER ===== */
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.wallpaper-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+}
+.wallpaper-swatch:hover { transform: scale(1.08); border-color: var(--text-muted); }
+.wallpaper-swatch.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,168,132,0.3); }
+
+/* GIF message styling */
+.msg-content .gif-message {
+  max-width: 250px;
+  border-radius: 8px;
+}
+
+@media (max-width: 768px) {
+  .expression-panel {
+    left: 0; right: 0; bottom: 56px;
+    border-radius: 12px 12px 0 0;
+    height: 280px;
+  }
+  .emoji-full-grid { grid-template-columns: repeat(7, 1fr); }
+  .gif-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Emoji panel button in input area */
+.emoji-panel-btn {
+  color: var(--text-muted);
+}
+.emoji-panel-btn:hover {
+  color: var(--accent);
+}

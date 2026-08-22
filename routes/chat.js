@@ -216,6 +216,23 @@ router.put('/conversations/:id/mute', authenticateToken, async (req, res) => {
   res.json({ muted_until: mutedUntil });
 });
 
+// Set wallpaper per conversation
+router.put('/conversations/:id/wallpaper', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const { wallpaper } = req.body;
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+  const val = wallpaper === 'default' ? null : wallpaper;
+  await query('UPDATE conversation_members SET wallpaper = $1 WHERE conversation_id = $2 AND user_id = $3', [val, convId, req.user.id]);
+  res.json({ wallpaper: val });
+});
+
+// Get wallpaper for conversation
+router.get('/conversations/:id/wallpaper', authenticateToken, async (req, res) => {
+  const result = await query('SELECT wallpaper FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+  res.json({ wallpaper: result.rows.length > 0 ? result.rows[0].wallpaper : null });
+});
+
 // Get group members
 router.get('/conversations/:id/members', authenticateToken, async (req, res) => {
   const result = await query(`
@@ -230,7 +247,7 @@ router.get('/conversations/:id/members', authenticateToken, async (req, res) => 
 router.get('/conversations', authenticateToken, async (req, res) => {
   const result = await query(`
     SELECT c.*,
-      cm.archived, cm.muted_until,
+      cm.archived, cm.muted_until, cm.wallpaper,
       CASE WHEN c.type = 'private' THEN (
         SELECT u.username FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $1
       ) ELSE c.name END as display_name,

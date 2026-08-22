@@ -370,6 +370,10 @@ async function openConversation(conv) {
   }
   if (window.innerWidth <= 768) sidebar.classList.add('hidden');
   socket.emit('join_conversation', { conversation_id: conv.id });
+  // Apply wallpaper (conv.wallpaper comes from conversations API)
+  if (typeof applyWallpaper === 'function') {
+    applyWallpaper(conv.wallpaper || null);
+  }
 }
 
 async function loadMessages(convId) {
@@ -441,6 +445,10 @@ function appendMessage(msg, allReactions, allReceipts, starredIds) {
       '<div class="file-info"><span class="file-name">' + escapeHtml(msg.file_name || 'File') + '</span></div></a>';
   } else if (msg.type === 'poll') {
     contentHtml = '<div class="poll-card" data-poll-id="' + msg.content + '"><div class="poll-loading">&#128202; Loading poll...</div></div>';
+  } else if (msg.type === 'gif') {
+    contentHtml = '<img src="' + escapeHtml(msg.content) + '" alt="GIF" class="gif-message" onclick="openLightbox(this.src)" loading="lazy">';
+  } else if (msg.type === 'sticker') {
+    contentHtml = '<div style="font-size:64px;line-height:1;">' + (msg.content || '') + '</div>';
   } else {
     contentHtml = escapeHtml(msg.content || '');
     contentHtml = linkify(contentHtml);
@@ -1159,6 +1167,7 @@ async function showChatInfo() {
   var commonHtml = '<div class="info-actions" style="margin-bottom:16px;display:flex;flex-direction:column;gap:8px;">';
   commonHtml += '<button class="btn-info-action" onclick="archiveConversation(' + currentConversation.id + ')">&#128451; ' + (currentConversation.archived ? 'Unarchive' : 'Archive') + ' Chat</button>';
   commonHtml += '<button class="btn-info-action" onclick="openMuteModal()">&#128263; Mute Notifications</button>';
+  commonHtml += '<button class="btn-info-action" onclick="showWallpaperPicker()">&#127912; Chat Wallpaper</button>';
   var timerVal = currentConversation.disappearing_timer || 0;
   var timerLabel = timerVal === 0 ? 'Off' : (timerVal === 86400 ? '24 hours' : (timerVal === 604800 ? '7 days' : '90 days'));
   commonHtml += '<div class="info-disappearing"><span style="font-size:13px;">&#9201; Disappearing messages: <strong>' + timerLabel + '</strong></span>';
@@ -2258,4 +2267,412 @@ async function votePoll(pollId, optionId, container) {
       socket.emit('poll_vote', { conversation_id: currentConversation.id, poll_id: pollId, votes: data.votes });
     }
   } catch(e) { console.error(e); }
+}
+
+// ===== PHASE 2: EMOJI KEYBOARD, GIF SEARCH, STICKERS, WALLPAPERS =====
+
+// Comprehensive Emoji Dataset
+const EMOJI_DATA = {
+  'Smileys': ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','🫤','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖'],
+  'People': ['👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦿','🦵','🦶','👂','🦻','👃','🧠','🫀','🫁','🦷','🦴','👀','👁️','👅','👄','🫦','👶','🧒','👦','👧','🧑','👱','👨','🧔','👩','🧓','👴','👵','🙍','🙎','🙅','🙆','💁','🙋','🧏','🙇','🤦','🤷','👮','🕵️','💂','🥷','👷','🫅','🤴','👸','👳','👲','🧕','🤵','👰','🤰','🫃','🫄','🤱','👼','🎅','🤶','🦸','🦹','🧙','🧚','🧛','🧜','🧝','🧞','🧟','🧌','💆','💇','🚶','🧍','🧎','🏃','💃','🕺','🕴️','👯','🧖','🧗','🤸','⛹️','🏋️','🚴','🚵','🤼','🤽','🤾','🤺','⛷️','🏂','🏌️','🏇','🧘','🛀','🛌','👭','👫','👬','💏','💑','👪','👨‍👩‍👦','👨‍👩‍👧','👨‍👩‍👧‍👦'],
+  'Animals': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐻‍❄️','🐨','🐯','🦁','🐮','🐷','🐽','🐸','🐵','🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🪱','🐛','🦋','🐌','🐞','🐜','🪰','🪲','🪳','🦟','🦗','🕷️','🕸️','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🪼','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🪸','🐊','🐅','🐆','🦓','🫏','🦍','🦧','🐘','🦣','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🪶','🐓','🦃','🦤','🦚','🦜','🦢','🪿','🦩','🕊️','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿️','🦔'],
+  'Food': ['🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🫛','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🫒','🧄','🧅','🫚','🥔','🍠','🫘','🥐','🥯','🍞','🥖','🥨','🧀','🥚','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🦴','🌭','🍔','🍟','🍕','🫓','🥪','🥙','🧆','🌮','🌯','🫔','🥗','🥘','🫕','🥫','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥠','🥮','🍢','🍡','🍧','🍨','🍦','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🥛','🍼','🫖','☕','🍵','🧃','🥤','🧋','🫙','🍶','🍺','🍻','🥂','🍷','🫗','🥃','🍸','🍹','🧉','🍾','🧊','🥄','🍴','🍽️','🥣','🥡','🥢','🧂'],
+  'Activities': ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🏑','🥍','🏏','🪃','🥅','⛳','🪁','🏹','🎣','🤿','🥊','🥋','🎽','🛹','🛼','🛷','⛸️','🥌','🎿','⛷️','🏂','🪂','🏋️','🤼','🤸','⛹️','🤺','🤾','🏌️','🏇','🧘','🏄','🏊','🤽','🚣','🧗','🚴','🚵','🎖️','🏆','🥇','🥈','🥉','🏅','🎪','🤹','🎭','🎨','🎬','🎤','🎧','🎼','🎹','🥁','🪘','🪇','🎷','🎺','🪗','🎸','🪕','🎻','🎲','♟️','🎯','🎳','🎮','🕹️','🧩','🪅','🪩','🪆'],
+  'Travel': ['🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🦽','🦼','🛺','🚲','🛴','🛹','🛼','🚏','🛣️','🛤️','🛞','⛽','🛞','🚨','🚥','🚦','🛑','🚧','⚓','🛟','⛵','🛶','🚤','🛳️','⛴️','🛥️','🚢','✈️','🛩️','🛫','🛬','🪂','💺','🚁','🚟','🚠','🚡','🛰️','🚀','🛸','🌍','🌎','🌏','🌐','🗺️','🧭','🏔️','⛰️','🌋','🗻','🏕️','🏖️','🏜️','🏝️','🏞️','🏟️','🏛️','🏗️','🧱','🪨','🪵','🛖','🏘️','🏚️','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰','💒','🗼','🗽','⛪','🕌','🛕','🕍','⛩️','🕋','⛲','⛺','🌁','🌃','🏙️','🌄','🌅','🌆','🌇','🌉','♨️','🎠','🛝','🎡','🎢','💈','🎪','🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚝','🚞','🚋','🚔','🚍','🚘','🚖'],
+  'Objects': ['⌚','📱','📲','💻','⌨️','🖥️','🖨️','🖱️','🖲️','🕹️','🗜️','💽','💾','💿','📀','📼','📷','📸','📹','🎥','📽️','🎞️','📞','☎️','📟','📠','📺','📻','🎙️','🎚️','🎛️','🧭','⏱️','⏲️','⏰','🕰️','⌛','⏳','📡','🔋','🪫','🔌','💡','🔦','🕯️','🪔','🧯','🛢️','🪙','💸','💵','💴','💶','💷','🪪','💳','💰','🧾','✉️','📧','📨','📩','📤','📥','📦','📫','📪','📬','📭','📮','🗳️','✏️','✒️','🖋️','🖊️','🖌️','🖍️','📝','💼','📁','📂','🗂️','📅','📆','🗒️','🗓️','📇','📈','📉','📊','📋','📌','📍','📎','🖇️','📏','📐','✂️','🗃️','🗄️','🗑️','🔒','🔓','🔏','🔐','🔑','🗝️','🔨','🪓','⛏️','⚒️','🛠️','🗡️','⚔️','💣','🪃','🏹','🛡️','🪚','🔧','🪛','🔩','⚙️','🗜️','⚖️','🦯','🔗','⛓️','🪝','🧰','🧲','🪜','🧪','🧫','🧬','🔬','🔭','📡','💉','🩸','💊','🩹','🩼','🩺','🩻','🚪','🛗','🪞','🪟','🛏️','🛋️','🪑','🚽','🪠','🚿','🛁','🪤','🪒','🧴','🧷','🧹','🧺','🧻','🪣','🧼','🫧','🪥','🧽','🧯','🛒','🚬','⚰️','🪦','⚱️','🧿','🪬','🏺','🔮','📿','🧿','💈'],
+  'Symbols': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','⚛️','🉑','☢️','☣️','📴','📳','🈶','🈚','🈸','🈺','🈷️','✴️','🆚','💮','🉐','㊙️','㊗️','🈴','🈵','🈹','🈲','🅰️','🅱️','🆎','🆑','🅾️','🆘','❌','⭕','🛑','⛔','📛','🚫','💯','💢','♨️','🚷','🚯','🚳','🚱','🔞','📵','🚭','❗','❕','❓','❔','‼️','⁉️','🔅','🔆','〽️','⚠️','🚸','🔱','⚜️','🔰','♻️','✅','🈯','💹','❇️','✳️','❎','🌐','💠','Ⓜ️','🌀','💤','🏧','🚾','♿','🅿️','🛗','🈳','🈂️','🛂','🛃','🛄','🛅','🚹','🚺','🚼','⚧️','🚻','🚮','🎦','📶','🈁','🔣','ℹ️','🔤','🔡','🔠','🆖','🆗','🆙','🆒','🆕','🆓','0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟','🔢','#️⃣','*️⃣','⏏️','▶️','⏸️','⏯️','⏹️','⏺️','⏭️','⏮️','⏩','⏪','⏫','⏬','◀️','🔼','🔽','➡️','⬅️','⬆️','⬇️','↗️','↘️','↙️','↖️','↕️','↔️','↪️','↩️','⤴️','⤵️','🔀','🔁','🔂','🔄','🔃','🎵','🎶','➕','➖','➗','✖️','🟰','♾️','💲','💱','™️','©️','®️','〰️','➰','➿','🔚','🔙','🔛','🔝','🔜','✔️','☑️','🔘','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤','🔺','🔻','🔸','🔹','🔶','🔷','🔳','🔲','▪️','▫️','◾','◽','◼️','◻️','🟥','🟧','🟨','🟩','🟦','🟪','⬛','⬜','🟫','🔈','🔇','🔉','🔊','🔔','🔕','📣','📢','👁️‍🗨️','💬','💭','🗯️','♠️','♣️','♥️','♦️','🃏','🎴','🀄','🕐','🕑','🕒','🕓','🕔','🕕','🕖','🕗','🕘','🕙','🕚','🕛']
+};
+
+// Sticker packs (emoji-based large stickers)
+const STICKER_PACKS = [
+  ['😂','🤣','😭','💀','🙏','🔥','❤️','👀','💯','🎉','👋','✨','🥺','😍','🤮'],
+  ['👑','🦋','🌈','🌸','🍕','🎮','💎','🚀','⚡','🌙','🎵','🍀','🦄','🐱','🐶'],
+  ['👍','👎','✌️','🤞','🤟','🤘','👏','💪','🙌','🫶','🤝','🫡','🤌','👊','✊'],
+  ['🎂','🎁','🎈','🎊','🥳','🎆','🎇','✨','🌟','⭐','💫','🪩','🎭','🎪','🎨']
+];
+
+// Wallpaper presets
+const WALLPAPER_PRESETS = [
+  '#0b141a', '#1a2e35', '#0d1f2d', '#12261e', '#1a1a2e',
+  '#1e3a3a', '#2d1b2e', '#0f2027', '#1b1b3a', '#162447',
+  '#1f4037', '#2c3e50', '#1a1a40', '#0f3443', '#34495e',
+  '#2c2c54', '#706fd3', '#33d9b2', '#218c74', '#474787',
+  '#e17055', '#00b894', '#6c5ce7', '#fd79a8', '#ffeaa7'
+];
+
+const WALLPAPER_GRADIENTS = [
+  'linear-gradient(135deg, #0b141a, #1a2e35)',
+  'linear-gradient(135deg, #0f2027, #203a43, #2c5364)',
+  'linear-gradient(135deg, #1a1a2e, #16213e, #0f3460)',
+  'linear-gradient(135deg, #232526, #414345)',
+  'linear-gradient(135deg, #1d2b64, #f8cdda20)',
+  'linear-gradient(135deg, #0c3547, #1a5276)',
+  'linear-gradient(135deg, #141e30, #243b55)',
+  'linear-gradient(135deg, #000428, #004e92)',
+  'linear-gradient(135deg, #200122, #6f0000)',
+  'linear-gradient(135deg, #1f4037, #99f2c8)'
+];
+
+// Expression panel state
+let expressionPanelOpen = false;
+let currentExpressionTab = 'emoji';
+let gifSearchTimeout = null;
+
+// Initialize expression panel
+function initExpressionPanel() {
+  var panel = document.getElementById('expressionPanel');
+  var btn = document.getElementById('emojiPanelBtn');
+  if (!btn || !panel) return;
+
+  btn.addEventListener('click', toggleExpressionPanel);
+
+  // Tab switching
+  panel.querySelectorAll('.expression-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      switchExpressionTab(tab.dataset.tab);
+    });
+  });
+
+  // Search
+  var searchInput = document.getElementById('expressionSearch');
+  searchInput.addEventListener('input', function() {
+    if (currentExpressionTab === 'emoji') {
+      filterEmojis(searchInput.value);
+    } else if (currentExpressionTab === 'gif') {
+      clearTimeout(gifSearchTimeout);
+      gifSearchTimeout = setTimeout(function() { searchGifs(searchInput.value); }, 400);
+    }
+  });
+
+  // Close panel on outside click
+  document.addEventListener('click', function(e) {
+    if (expressionPanelOpen && !panel.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+      closeExpressionPanel();
+    }
+  });
+
+  // Build emoji grid
+  buildEmojiGrid();
+  buildStickerGrid();
+
+  // Wallpaper modal
+  var closeWp = document.getElementById('closeWallpaper');
+  if (closeWp) closeWp.addEventListener('click', function() { hideModal('wallpaperModal'); });
+  var resetWp = document.getElementById('resetWallpaperBtn');
+  if (resetWp) resetWp.addEventListener('click', resetWallpaper);
+}
+
+function toggleExpressionPanel() {
+  if (expressionPanelOpen) {
+    closeExpressionPanel();
+  } else {
+    openExpressionPanel();
+  }
+}
+
+function openExpressionPanel() {
+  var panel = document.getElementById('expressionPanel');
+  panel.style.display = 'flex';
+  expressionPanelOpen = true;
+  if (currentExpressionTab === 'gif') loadTrendingGifs();
+}
+
+function closeExpressionPanel() {
+  var panel = document.getElementById('expressionPanel');
+  panel.style.display = 'none';
+  expressionPanelOpen = false;
+}
+
+function switchExpressionTab(tab) {
+  currentExpressionTab = tab;
+  var panel = document.getElementById('expressionPanel');
+  panel.querySelectorAll('.expression-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
+  document.getElementById('emojiTabContent').style.display = tab === 'emoji' ? 'block' : 'none';
+  document.getElementById('gifTabContent').style.display = tab === 'gif' ? 'block' : 'none';
+  document.getElementById('stickersTabContent').style.display = tab === 'stickers' ? 'block' : 'none';
+
+  var searchInput = document.getElementById('expressionSearch');
+  if (tab === 'emoji') { searchInput.placeholder = 'Search emoji...'; searchInput.value = ''; }
+  else if (tab === 'gif') { searchInput.placeholder = 'Search GIFs...'; searchInput.value = ''; loadTrendingGifs(); }
+  else { searchInput.placeholder = 'Stickers'; searchInput.value = ''; }
+}
+
+function buildEmojiGrid() {
+  var categories = document.getElementById('emojiCategories');
+  var grid = document.getElementById('emojiFullGrid');
+  if (!categories || !grid) return;
+
+  var catIcons = { 'Smileys': '😀', 'People': '👋', 'Animals': '🐱', 'Food': '🍎', 'Activities': '⚽', 'Travel': '🌍', 'Objects': '💡', 'Symbols': '❤️' };
+  var catNames = Object.keys(EMOJI_DATA);
+
+  // Recently used
+  var recent = JSON.parse(localStorage.getItem('cw_recent_emojis') || '[]');
+
+  // Category buttons
+  categories.innerHTML = '';
+  if (recent.length > 0) {
+    var recentBtn = document.createElement('button');
+    recentBtn.className = 'emoji-cat-btn active';
+    recentBtn.textContent = '🕐';
+    recentBtn.title = 'Recent';
+    recentBtn.addEventListener('click', function() { scrollToCategory('recent'); setActiveCat(recentBtn); });
+    categories.appendChild(recentBtn);
+  }
+  catNames.forEach(function(cat) {
+    var btn = document.createElement('button');
+    btn.className = 'emoji-cat-btn' + (recent.length === 0 && cat === catNames[0] ? ' active' : '');
+    btn.textContent = catIcons[cat] || '📁';
+    btn.title = cat;
+    btn.addEventListener('click', function() { scrollToCategory(cat); setActiveCat(btn); });
+    categories.appendChild(btn);
+  });
+
+  // Build grid
+  renderFullEmojiGrid(recent);
+}
+
+function renderFullEmojiGrid(recent) {
+  var grid = document.getElementById('emojiFullGrid');
+  grid.innerHTML = '';
+
+  if (!recent) recent = JSON.parse(localStorage.getItem('cw_recent_emojis') || '[]');
+
+  if (recent.length > 0) {
+    var label = document.createElement('div');
+    label.className = 'emoji-section-label';
+    label.textContent = 'Recent';
+    label.id = 'emoji-section-recent';
+    grid.appendChild(label);
+    recent.forEach(function(e) { grid.appendChild(makeEmojiButton(e)); });
+  }
+
+  Object.keys(EMOJI_DATA).forEach(function(cat) {
+    var label = document.createElement('div');
+    label.className = 'emoji-section-label';
+    label.textContent = cat;
+    label.id = 'emoji-section-' + cat;
+    grid.appendChild(label);
+    EMOJI_DATA[cat].forEach(function(e) { grid.appendChild(makeEmojiButton(e)); });
+  });
+}
+
+function makeEmojiButton(emoji) {
+  var btn = document.createElement('button');
+  btn.textContent = emoji;
+  btn.addEventListener('click', function() { insertEmoji(emoji); });
+  return btn;
+}
+
+function insertEmoji(emoji) {
+  var input = document.getElementById('messageInput');
+  var pos = input.selectionStart || input.value.length;
+  input.value = input.value.slice(0, pos) + emoji + input.value.slice(pos);
+  input.focus();
+  input.selectionStart = input.selectionEnd = pos + emoji.length;
+
+  // Save to recent
+  var recent = JSON.parse(localStorage.getItem('cw_recent_emojis') || '[]');
+  recent = recent.filter(function(e) { return e !== emoji; });
+  recent.unshift(emoji);
+  if (recent.length > 24) recent = recent.slice(0, 24);
+  localStorage.setItem('cw_recent_emojis', JSON.stringify(recent));
+}
+
+function filterEmojis(query) {
+  var grid = document.getElementById('emojiFullGrid');
+  if (!query.trim()) { renderFullEmojiGrid(); return; }
+  grid.innerHTML = '';
+  var q = query.toLowerCase();
+  Object.keys(EMOJI_DATA).forEach(function(cat) {
+    if (cat.toLowerCase().includes(q)) {
+      EMOJI_DATA[cat].forEach(function(e) { grid.appendChild(makeEmojiButton(e)); });
+    }
+  });
+  // If nothing matched by category, just show all and let user scroll
+  if (grid.children.length === 0) {
+    Object.keys(EMOJI_DATA).forEach(function(cat) {
+      EMOJI_DATA[cat].forEach(function(e) {
+        grid.appendChild(makeEmojiButton(e));
+      });
+    });
+  }
+}
+
+function scrollToCategory(cat) {
+  var el = document.getElementById('emoji-section-' + cat);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setActiveCat(btn) {
+  document.querySelectorAll('.emoji-cat-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+}
+
+// ===== GIF SEARCH (Tenor) =====
+var TENOR_KEY = 'AIzaSyDDADRJFjJy3PknIp9gGqH-cLxpRJqG7p0';
+
+function loadTrendingGifs() {
+  var grid = document.getElementById('gifGrid');
+  var loading = document.getElementById('gifLoading');
+  grid.innerHTML = '';
+  loading.style.display = 'block';
+  fetch('https://tenor.googleapis.com/v2/featured?key=' + TENOR_KEY + '&limit=20&media_filter=tinygif,gif')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      loading.style.display = 'none';
+      renderGifs(data.results || []);
+    })
+    .catch(function() { loading.style.display = 'none'; grid.innerHTML = '<p style="color:var(--text-muted);padding:20px;text-align:center;">Could not load GIFs</p>'; });
+}
+
+function searchGifs(q) {
+  if (!q.trim()) { loadTrendingGifs(); return; }
+  var grid = document.getElementById('gifGrid');
+  var loading = document.getElementById('gifLoading');
+  grid.innerHTML = '';
+  loading.style.display = 'block';
+  fetch('https://tenor.googleapis.com/v2/search?q=' + encodeURIComponent(q) + '&key=' + TENOR_KEY + '&limit=20&media_filter=tinygif,gif')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      loading.style.display = 'none';
+      renderGifs(data.results || []);
+    })
+    .catch(function() { loading.style.display = 'none'; });
+}
+
+function renderGifs(results) {
+  var grid = document.getElementById('gifGrid');
+  grid.innerHTML = '';
+  results.forEach(function(gif) {
+    var tiny = gif.media_formats && gif.media_formats.tinygif ? gif.media_formats.tinygif.url : null;
+    var full = gif.media_formats && gif.media_formats.gif ? gif.media_formats.gif.url : tiny;
+    if (!tiny) return;
+    var img = document.createElement('img');
+    img.src = tiny;
+    img.alt = 'GIF';
+    img.loading = 'lazy';
+    img.addEventListener('click', function() { sendGif(full || tiny); });
+    grid.appendChild(img);
+  });
+}
+
+function sendGif(url) {
+  if (!currentConversation) return;
+  socket.emit('send_message', {
+    conversation_id: currentConversation.id,
+    content: url,
+    type: 'gif'
+  });
+  closeExpressionPanel();
+}
+
+// ===== STICKERS =====
+function buildStickerGrid() {
+  var grid = document.getElementById('stickerGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  STICKER_PACKS.forEach(function(pack) {
+    pack.forEach(function(sticker) {
+      var div = document.createElement('div');
+      div.className = 'sticker-item';
+      div.textContent = sticker;
+      div.addEventListener('click', function() { sendSticker(sticker); });
+      grid.appendChild(div);
+    });
+  });
+}
+
+function sendSticker(sticker) {
+  if (!currentConversation) return;
+  socket.emit('send_message', {
+    conversation_id: currentConversation.id,
+    content: sticker,
+    type: 'sticker'
+  });
+  closeExpressionPanel();
+}
+
+// ===== WALLPAPER =====
+function showWallpaperPicker() {
+  var grid = document.getElementById('wallpaperGrid');
+  grid.innerHTML = '';
+
+  // Solid colors
+  WALLPAPER_PRESETS.forEach(function(color) {
+    var swatch = document.createElement('div');
+    swatch.className = 'wallpaper-swatch';
+    swatch.style.background = color;
+    swatch.addEventListener('click', function() { setWallpaper(color); });
+    grid.appendChild(swatch);
+  });
+
+  // Gradients
+  WALLPAPER_GRADIENTS.forEach(function(grad) {
+    var swatch = document.createElement('div');
+    swatch.className = 'wallpaper-swatch';
+    swatch.style.background = grad;
+    swatch.addEventListener('click', function() { setWallpaper(grad); });
+    grid.appendChild(swatch);
+  });
+
+  showModal('wallpaperModal');
+}
+
+async function setWallpaper(value) {
+  if (!currentConversation) return;
+  try {
+    await fetch('/api/chat/conversations/' + currentConversation.id + '/wallpaper', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallpaper: value })
+    });
+    applyWallpaper(value);
+    currentConversation.wallpaper = value;
+    hideModal('wallpaperModal');
+  } catch(e) { console.error(e); }
+}
+
+async function resetWallpaper() {
+  if (!currentConversation) return;
+  try {
+    await fetch('/api/chat/conversations/' + currentConversation.id + '/wallpaper', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallpaper: 'default' })
+    });
+    applyWallpaper(null);
+    currentConversation.wallpaper = null;
+    hideModal('wallpaperModal');
+  } catch(e) { console.error(e); }
+}
+
+function applyWallpaper(value) {
+  var container = document.getElementById('messagesContainer');
+  if (!container) return;
+  if (!value) {
+    container.style.background = '';
+  } else if (value.startsWith('linear-gradient')) {
+    container.style.background = value;
+  } else {
+    container.style.background = value;
+  }
+}
+
+// Load wallpaper when opening a conversation
+async function loadWallpaper(convId) {
+  try {
+    var res = await fetch('/api/chat/conversations/' + convId + '/wallpaper', { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    applyWallpaper(data.wallpaper);
+  } catch(e) { applyWallpaper(null); }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(initExpressionPanel, 100);
+});
+
+// Also init if DOM already ready
+if (document.readyState !== 'loading') {
+  setTimeout(initExpressionPanel, 100);
 }
