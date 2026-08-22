@@ -97,6 +97,7 @@
 
         <div class="message-input-area">
           <button class="icon-btn attach-btn" id="attachBtn" title="Attach file">&#128206;</button>
+          <button class="icon-btn view-once-toggle" id="viewOnceToggle" title="Toggle view once">&#9865;</button>
           <button class="icon-btn voice-btn" id="voiceBtn" title="Voice note">&#127908;</button>
           <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off">
           <button class="send-btn" id="sendBtn" title="Send">&#9654;</button>
@@ -304,7 +305,16 @@
     <img id="lightboxImg" src="" alt="Full image">
   </div>
 
-  <!-- Status Create Modal -->
+  <!-- View Once Viewer -->
+  <div class="view-once-viewer" id="viewOnceViewer" style="display:none;">
+    <div class="view-once-viewer-header">
+      <span>View once</span>
+      <button class="lightbox-close" id="closeViewOnce">&#10005;</button>
+    </div>
+    <div class="view-once-viewer-content" id="viewOnceContent"></div>
+  </div>
+
+  <!-- Status Crea
   <div class="modal" id="statusCreateModal" style="display:none;">
     <div class="modal-overlay"></div>
     <div class="modal-content">

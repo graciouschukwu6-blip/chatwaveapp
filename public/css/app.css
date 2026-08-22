@@ -922,6 +922,36 @@ body {
   border-color: rgba(255,255,255,0.1);
 }
 
+/* View Once Toggle Button */
+.view-once-toggle {
+  font-size: 16px;
+  opacity: 0.5;
+  transition: all 0.2s;
+}
+.view-once-toggle.active {
+  opacity: 1;
+  color: var(--accent);
+  background: rgba(102,126,234,0.15);
+  border-radius: 50%;
+}
+
+/* View Once Full-Screen Viewer */
+.view-once-viewer {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.95);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.view-once-viewer-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 16px 20px; display: flex;
+  justify-content: space-between; align-items: center;
+  color: rgba(255,255,255,0.7); font-size: 14px;
+}
+.view-once-viewer-content { display: flex; align-items: center; justify-content: center; }
+
 /* Mention highlights */
 .mention {
   background: rgba(102,126,234,0.2);

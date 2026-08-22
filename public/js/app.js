@@ -15,6 +15,7 @@ let recordingSeconds = 0;
 let forwardMessageId = null;
 let selectedForwardConvs = [];
 let editingMessageId = null;
+let viewOnceActive = false;
 
 const EMOJIS = ['\u{1F44D}','\u{2764}','\u{1F602}','\u{1F62E}','\u{1F622}','\u{1F621}','\u{1F525}','\u{1F44F}','\u{1F389}','\u{1F4AF}','\u{2705}','\u{274C}','\u{1F440}','\u{1F64F}','\u{1F4AA}','\u{1F60E}','\u{1F914}','\u{1F60D}','\u{1F480}','\u{1F973}','\u{1F62D}','\u{1FAE1}','\u{1F49C}','\u{1F92F}'];
 
@@ -508,6 +509,12 @@ function setupEventListeners() {
   attachBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', handleFileUpload);
 
+  // View Once toggle
+  document.getElementById('viewOnceToggle').addEventListener('click', toggleViewOnce);
+
+  // Close View Once viewer
+  document.getElementById('closeViewOnce').addEventListener('click', closeViewOnceViewer);
+
   // Voice
   document.getElementById('voiceBtn').addEventListener('click', startRecording);
   document.getElementById('cancelRecording').addEventListener('click', cancelRecording);
@@ -664,10 +671,7 @@ async function handleFileUpload(e) {
       if (/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)) type = 'image';
       else if (/\.(mp4|webm|mov)$/i.test(file.name)) type = 'video';
 
-      var viewOnce = false;
-      if (isMedia) {
-        viewOnce = confirm('Send as view once? (media will disappear after being viewed)');
-      }
+      var viewOnce = isMedia && viewOnceActive;
       socket.emit('send_message', {
         conversation_id: currentConversation.id,
         content: file.name,
@@ -678,6 +682,7 @@ async function handleFileUpload(e) {
         view_once: viewOnce ? 1 : 0
       });
       cancelReply();
+      if (viewOnce) toggleViewOnce();
     }
   } catch (err) { console.error(err); }
   fileInput.value = '';
@@ -723,7 +728,7 @@ async function sendRecording() {
       });
       const data = await res.json();
       if (data.url) {
-        var voiceViewOnce = confirm('Send as view once? (voice note will disappear after being heard)');
+        var voiceViewOnce = viewOnceActive;
         socket.emit('send_message', {
           conversation_id: currentConversation.id,
           content: 'Voice message',
@@ -732,6 +737,7 @@ async function sendRecording() {
           file_name: data.name,
           view_once: voiceViewOnce ? 1 : 0
         });
+        if (voiceViewOnce) toggleViewOnce();
       }
     } catch(e) { console.error(e); }
   };
@@ -1312,24 +1318,48 @@ async function openViewOnce(msgId, el) {
     });
     var data = await res.json();
     if (res.ok && data.file_url) {
+      // Open full-screen viewer
+      var viewer = document.getElementById('viewOnceViewer');
+      var contentEl = document.getElementById('viewOnceContent');
       if (data.type === 'voice') {
-        el.innerHTML = '<audio src="' + data.file_url + '" autoplay controls></audio><p style="font-size:11px;color:var(--text-muted);margin-top:4px;">This will disappear when you leave</p>';
+        contentEl.innerHTML = '<audio src="' + data.file_url + '" autoplay controls style="width:80%;max-width:400px;"></audio>';
       } else if (data.type === 'video') {
-        el.innerHTML = '<video src="' + data.file_url + '" autoplay playsinline controls style="max-width:100%;border-radius:8px;"></video><p style="font-size:11px;color:var(--text-muted);margin-top:4px;">View once</p>';
+        contentEl.innerHTML = '<video src="' + data.file_url + '" autoplay playsinline controls style="max-width:90vw;max-height:80vh;border-radius:8px;"></video>';
       } else {
-        el.innerHTML = '<img src="' + data.file_url + '" style="max-width:100%;border-radius:8px;" onclick="openLightbox(this.src)"><p style="font-size:11px;color:var(--text-muted);margin-top:4px;">View once</p>';
+        contentEl.innerHTML = '<img src="' + data.file_url + '" style="max-width:90vw;max-height:80vh;border-radius:8px;object-fit:contain;">';
       }
+      viewer.style.display = 'flex';
       el.classList.add('opened');
-      // After 10 seconds, replace with "opened" message
-      setTimeout(function() {
-        el.innerHTML = '<em style="color:var(--text-muted);">&#128065; Opened</em>';
-      }, 10000);
+      el.innerHTML = '<em style="color:var(--text-muted);">&#128065; Opened</em>';
     } else {
       el.innerHTML = '<em style="color:var(--text-muted);">&#128065; Opened</em>';
     }
   } catch(e) {
     el.innerHTML = '<em style="color:var(--text-muted);">Failed to load</em>';
   }
+}
+
+function toggleViewOnce() {
+  viewOnceActive = !viewOnceActive;
+  var btn = document.getElementById('viewOnceToggle');
+  if (viewOnceActive) {
+    btn.classList.add('active');
+    btn.title = 'View once ON — next media will be view once';
+  } else {
+    btn.classList.remove('active');
+    btn.title = 'Toggle view once';
+  }
+}
+
+function closeViewOnceViewer() {
+  var viewer = document.getElementById('viewOnceViewer');
+  var contentEl = document.getElementById('viewOnceContent');
+  var videos = contentEl.querySelectorAll('video');
+  var audios = contentEl.querySelectorAll('audio');
+  videos.forEach(function(v) { v.pause(); v.src = ''; });
+  audios.forEach(function(a) { a.pause(); a.src = ''; });
+  contentEl.innerHTML = '';
+  viewer.style.display = 'none';
 }
 
 function closeLightbox() {
