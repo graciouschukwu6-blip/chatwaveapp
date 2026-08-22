@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const db = require('../database');
+const { query } = require('../database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -16,430 +16,272 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
-// Voice note upload
 const voiceStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '../public/uploads/voice')),
-  filename: (req, file, cb) => {
-    cb(null, 'voice_' + Date.now() + '-' + Math.round(Math.random() * 1E9) + '.webm');
-  }
+  filename: (req, file, cb) => { cb(null, 'voice_' + Date.now() + '-' + Math.round(Math.random() * 1E9) + '.webm'); }
 });
 const uploadVoice = multer({ storage: voiceStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-// Group avatar upload
 const groupAvatarStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '../public/uploads/groups')),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, 'group_' + req.params.id + '_' + Date.now() + ext);
-  }
+  filename: (req, file, cb) => { cb(null, 'group_' + req.params.id + '_' + Date.now() + path.extname(file.originalname)); }
 });
 const uploadGroupAvatar = multer({ storage: groupAvatarStorage, limits: { fileSize: 5 * 1024 * 1024 } });
 
-// Search user by chat number or username
-router.get('/users/search', authenticateToken, (req, res) => {
+// Search users
+router.get('/users/search', authenticateToken, async (req, res) => {
   const { q } = req.query;
   if (!q) return res.json({ users: [] });
-
-  const users = db.prepare(
-    `SELECT id, username, chat_number, avatar, status, last_seen, bio, status_message
-     FROM users 
-     WHERE (chat_number LIKE ? OR username LIKE ?) AND id != ?
-     AND id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = ?)
-     AND id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = ?)`
-  ).all(`%${q}%`, `%${q}%`, req.user.id, req.user.id, req.user.id);
-
-  res.json({ users });
+  const result = await query(
+    `SELECT id, username, chat_number, avatar, status, last_seen, bio, status_message FROM users
+     WHERE (chat_number LIKE $1 OR username LIKE $2) AND id != $3
+     AND id NOT IN (SELECT blocked_id FROM blocked_users WHERE blocker_id = $4)
+     AND id NOT IN (SELECT blocker_id FROM blocked_users WHERE blocked_id = $5)`,
+    ['%'+q+'%', '%'+q+'%', req.user.id, req.user.id, req.user.id]
+  );
+  res.json({ users: result.rows });
 });
 
-// Start or get a private conversation with a user (by chat number)
-router.post('/conversations/private', authenticateToken, (req, res) => {
+// Start private conversation
+router.post('/conversations/private', authenticateToken, async (req, res) => {
   const { chat_number } = req.body;
-  
-  const otherUser = db.prepare('SELECT id, username, chat_number, avatar FROM users WHERE chat_number = ?').get(chat_number);
-  if (!otherUser) {
-    return res.status(404).json({ error: 'User not found with that chat number' });
-  }
+  const userResult = await query('SELECT id, username, chat_number, avatar FROM users WHERE chat_number = $1', [chat_number]);
+  if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+  const otherUser = userResult.rows[0];
+  if (otherUser.id === req.user.id) return res.status(400).json({ error: 'Cannot chat with yourself' });
 
-  if (otherUser.id === req.user.id) {
-    return res.status(400).json({ error: 'Cannot start a conversation with yourself' });
-  }
+  const blocked = await query('SELECT id FROM blocked_users WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $3 AND blocked_id = $4)', [req.user.id, otherUser.id, otherUser.id, req.user.id]);
+  if (blocked.rows.length > 0) return res.status(403).json({ error: 'Cannot message this user' });
 
-  const blocked = db.prepare(
-    'SELECT id FROM blocked_users WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)'
-  ).get(req.user.id, otherUser.id, otherUser.id, req.user.id);
-  if (blocked) {
-    return res.status(403).json({ error: 'Cannot message this user' });
-  }
-
-  const existing = db.prepare(`
+  const existing = await query(`
     SELECT c.id FROM conversations c
-    JOIN conversation_members cm1 ON c.id = cm1.conversation_id AND cm1.user_id = ?
-    JOIN conversation_members cm2 ON c.id = cm2.conversation_id AND cm2.user_id = ?
+    JOIN conversation_members cm1 ON c.id = cm1.conversation_id AND cm1.user_id = $1
+    JOIN conversation_members cm2 ON c.id = cm2.conversation_id AND cm2.user_id = $2
     WHERE c.type = 'private'
-  `).get(req.user.id, otherUser.id);
+  `, [req.user.id, otherUser.id]);
 
-  if (existing) {
-    return res.json({ conversation_id: existing.id, user: otherUser });
-  }
+  if (existing.rows.length > 0) return res.json({ conversation_id: existing.rows[0].id, user: otherUser });
 
-  const conv = db.prepare('INSERT INTO conversations (type, created_by) VALUES (?, ?)').run('private', req.user.id);
-  db.prepare('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)').run(conv.lastInsertRowid, req.user.id, 'member');
-  db.prepare('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)').run(conv.lastInsertRowid, otherUser.id, 'member');
-
-  res.status(201).json({ conversation_id: conv.lastInsertRowid, user: otherUser });
+  const conv = await query('INSERT INTO conversations (type, created_by) VALUES ($1, $2) RETURNING id', ['private', req.user.id]);
+  const convId = conv.rows[0].id;
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, req.user.id, 'member']);
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, otherUser.id, 'member']);
+  res.status(201).json({ conversation_id: convId, user: otherUser });
 });
 
-// Create group conversation
-router.post('/conversations/group', authenticateToken, (req, res) => {
+// Create group
+router.post('/conversations/group', authenticateToken, async (req, res) => {
   const { name, members } = req.body;
-  
-  if (!name || !members || members.length < 1) {
-    return res.status(400).json({ error: 'Group name and at least 1 other member required' });
-  }
+  if (!name || !members || members.length < 1) return res.status(400).json({ error: 'Group name and at least 1 member required' });
 
-  const conv = db.prepare('INSERT INTO conversations (type, name, created_by) VALUES (?, ?, ?)').run('group', name, req.user.id);
-  
-  // Creator is admin
-  db.prepare('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)').run(conv.lastInsertRowid, req.user.id, 'admin');
-  
+  const conv = await query('INSERT INTO conversations (type, name, created_by) VALUES ($1, $2, $3) RETURNING id', ['group', name, req.user.id]);
+  const convId = conv.rows[0].id;
+  await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, req.user.id, 'admin']);
+
   for (const chatNum of members) {
-    const user = db.prepare('SELECT id FROM users WHERE chat_number = ?').get(chatNum.trim());
-    if (user) {
-      db.prepare('INSERT OR IGNORE INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)').run(conv.lastInsertRowid, user.id, 'member');
+    const u = await query('SELECT id FROM users WHERE chat_number = $1', [chatNum.trim()]);
+    if (u.rows.length > 0) {
+      await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [convId, u.rows[0].id, 'member']);
     }
   }
-
-  res.status(201).json({ conversation_id: conv.lastInsertRowid, name });
+  res.status(201).json({ conversation_id: convId, name });
 });
 
-// Update group (name, avatar) - admin only
-router.put('/conversations/:id', authenticateToken, uploadGroupAvatar.single('group_avatar'), (req, res) => {
+// Update group
+router.put('/conversations/:id', authenticateToken, uploadGroupAvatar.single('group_avatar'), async (req, res) => {
   const convId = req.params.id;
-  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
-  if (!member || member.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can update group settings' });
-  }
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can update group' });
 
-  if (req.body.name) {
-    db.prepare('UPDATE conversations SET name = ? WHERE id = ?').run(req.body.name, convId);
-  }
-  if (req.file) {
-    const avatarUrl = '/uploads/groups/' + req.file.filename;
-    db.prepare('UPDATE conversations SET group_avatar = ? WHERE id = ?').run(avatarUrl, convId);
-  }
+  if (req.body.name) await query('UPDATE conversations SET name = $1 WHERE id = $2', [req.body.name, convId]);
+  if (req.file) await query('UPDATE conversations SET group_avatar = $1 WHERE id = $2', ['/uploads/groups/' + req.file.filename, convId]);
 
-  const conv = db.prepare('SELECT * FROM conversations WHERE id = ?').get(convId);
-  res.json({ conversation: conv });
+  const conv = await query('SELECT * FROM conversations WHERE id = $1', [convId]);
+  res.json({ conversation: conv.rows[0] });
 });
 
-// Add member to group - admin only
-router.post('/conversations/:id/members', authenticateToken, (req, res) => {
+// Add member
+router.post('/conversations/:id/members', authenticateToken, async (req, res) => {
   const convId = req.params.id;
-  const { chat_number } = req.body;
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can add members' });
 
-  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
-  if (!member || member.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can add members' });
-  }
-
-  const user = db.prepare('SELECT id, username, chat_number, avatar FROM users WHERE chat_number = ?').get(chat_number);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const u = await query('SELECT id, username, chat_number, avatar FROM users WHERE chat_number = $1', [req.body.chat_number]);
+  if (u.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
   try {
-    db.prepare('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES (?, ?, ?)').run(convId, user.id, 'member');
-    res.json({ message: 'Member added', user });
-  } catch (e) {
-    res.status(400).json({ error: 'User is already a member' });
-  }
+    await query('INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)', [convId, u.rows[0].id, 'member']);
+    res.json({ message: 'Member added', user: u.rows[0] });
+  } catch (e) { res.status(400).json({ error: 'User is already a member' }); }
 });
 
-// Remove member from group - admin only
-router.delete('/conversations/:id/members/:userId', authenticateToken, (req, res) => {
+// Remove member
+router.delete('/conversations/:id/members/:userId', authenticateToken, async (req, res) => {
   const convId = req.params.id;
   const targetId = parseInt(req.params.userId);
-
-  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
-  if (!member || member.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can remove members' });
-  }
-
-  if (targetId === req.user.id) {
-    return res.status(400).json({ error: 'Cannot remove yourself' });
-  }
-
-  db.prepare('DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?').run(convId, targetId);
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can remove members' });
+  if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot remove yourself' });
+  await query('DELETE FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, targetId]);
   res.json({ message: 'Member removed' });
 });
 
-// Make member admin - admin only
-router.put('/conversations/:id/members/:userId/role', authenticateToken, (req, res) => {
+// Change role
+router.put('/conversations/:id/members/:userId/role', authenticateToken, async (req, res) => {
   const convId = req.params.id;
   const targetId = parseInt(req.params.userId);
   const { role } = req.body;
+  if (!['admin', 'member'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
 
-  if (!['admin', 'member'].includes(role)) {
-    return res.status(400).json({ error: 'Role must be admin or member' });
-  }
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can change roles' });
+  if (targetId === req.user.id) return res.status(400).json({ error: 'Cannot change own role' });
 
-  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
-  if (!member || member.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can change roles' });
-  }
+  const target = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, targetId]);
+  if (target.rows.length === 0) return res.status(404).json({ error: 'Not a member' });
 
-  if (targetId === req.user.id) {
-    return res.status(400).json({ error: 'Cannot change your own role' });
-  }
-
-  const target = db.prepare('SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, targetId);
-  if (!target) {
-    return res.status(404).json({ error: 'User is not a member of this group' });
-  }
-
-  db.prepare('UPDATE conversation_members SET role = ? WHERE conversation_id = ? AND user_id = ?').run(role, convId, targetId);
+  await query('UPDATE conversation_members SET role = $1 WHERE conversation_id = $2 AND user_id = $3', [role, convId, targetId]);
   res.json({ message: role === 'admin' ? 'User is now an admin' : 'User is now a member', role });
 });
 
-// Lock/Unlock group - admin only
-router.put('/conversations/:id/lock', authenticateToken, (req, res) => {
+// Lock/Unlock group
+router.put('/conversations/:id/lock', authenticateToken, async (req, res) => {
   const convId = req.params.id;
   const { locked } = req.body;
+  const conv = await query('SELECT type FROM conversations WHERE id = $1', [convId]);
+  if (conv.rows.length === 0 || conv.rows[0].type !== 'group') return res.status(400).json({ error: 'Only groups can be locked' });
 
-  const conv = db.prepare('SELECT type FROM conversations WHERE id = ?').get(convId);
-  if (!conv || conv.type !== 'group') {
-    return res.status(400).json({ error: 'Only group chats can be locked' });
-  }
+  const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can lock' });
 
-  const member = db.prepare('SELECT role FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
-  if (!member || member.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can lock/unlock the group' });
-  }
-
-  db.prepare('UPDATE conversations SET locked = ? WHERE id = ?').run(locked ? 1 : 0, convId);
-  res.json({ message: locked ? 'Group is now locked' : 'Group is now unlocked', locked: !!locked });
+  await query('UPDATE conversations SET locked = $1 WHERE id = $2', [locked ? 1 : 0, convId]);
+  res.json({ message: locked ? 'Locked' : 'Unlocked', locked: !!locked });
 });
 
 // Get group members
-router.get('/conversations/:id/members', authenticateToken, (req, res) => {
-  const convId = req.params.id;
-  const members = db.prepare(`
+router.get('/conversations/:id/members', authenticateToken, async (req, res) => {
+  const result = await query(`
     SELECT u.id, u.username, u.chat_number, u.avatar, u.status, u.last_seen, cm.role
-    FROM conversation_members cm
-    JOIN users u ON cm.user_id = u.id
-    WHERE cm.conversation_id = ?
-    ORDER BY cm.role DESC, u.username ASC
-  `).all(convId);
-  res.json({ members });
+    FROM conversation_members cm JOIN users u ON cm.user_id = u.id
+    WHERE cm.conversation_id = $1 ORDER BY cm.role DESC, u.username ASC
+  `, [req.params.id]);
+  res.json({ members: result.rows });
 });
 
-// Get all conversations for current user
-router.get('/conversations', authenticateToken, (req, res) => {
-  const conversations = db.prepare(`
-    SELECT c.*, 
-      CASE 
-        WHEN c.type = 'private' THEN (
-          SELECT u.username FROM users u 
-          JOIN conversation_members cm ON u.id = cm.user_id 
-          WHERE cm.conversation_id = c.id AND u.id != ?
-        )
-        ELSE c.name
-      END as display_name,
-      CASE 
-        WHEN c.type = 'private' THEN (
-          SELECT u.avatar FROM users u 
-          JOIN conversation_members cm ON u.id = cm.user_id 
-          WHERE cm.conversation_id = c.id AND u.id != ?
-        )
-        ELSE c.group_avatar
-      END as display_avatar,
-      CASE 
-        WHEN c.type = 'private' THEN (
-          SELECT u.chat_number FROM users u 
-          JOIN conversation_members cm ON u.id = cm.user_id 
-          WHERE cm.conversation_id = c.id AND u.id != ?
-        )
-        ELSE NULL
-      END as display_chat_number,
-      CASE 
-        WHEN c.type = 'private' THEN (
-          SELECT u.id FROM users u 
-          JOIN conversation_members cm ON u.id = cm.user_id 
-          WHERE cm.conversation_id = c.id AND u.id != ?
-        )
-        ELSE NULL
-      END as display_user_id,
-      CASE 
-        WHEN c.type = 'private' THEN (
-          SELECT u.status FROM users u 
-          JOIN conversation_members cm ON u.id = cm.user_id 
-          WHERE cm.conversation_id = c.id AND u.id != ?
-        )
-        ELSE NULL
-      END as display_status,
-      CASE 
-        WHEN c.type = 'private' THEN (
-          SELECT u.last_seen FROM users u 
-          JOIN conversation_members cm ON u.id = cm.user_id 
-          WHERE cm.conversation_id = c.id AND u.id != ?
-        )
-        ELSE NULL
-      END as display_last_seen,
+// Get conversations
+router.get('/conversations', authenticateToken, async (req, res) => {
+  const result = await query(`
+    SELECT c.*,
+      CASE WHEN c.type = 'private' THEN (
+        SELECT u.username FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $1
+      ) ELSE c.name END as display_name,
+      CASE WHEN c.type = 'private' THEN (
+        SELECT u.avatar FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $2
+      ) ELSE c.group_avatar END as display_avatar,
+      CASE WHEN c.type = 'private' THEN (
+        SELECT u.chat_number FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $3
+      ) ELSE NULL END as display_chat_number,
+      CASE WHEN c.type = 'private' THEN (
+        SELECT u.status FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $4
+      ) ELSE NULL END as display_status,
+      CASE WHEN c.type = 'private' THEN (
+        SELECT u.last_seen FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $5
+      ) ELSE NULL END as display_last_seen,
       (SELECT content FROM messages WHERE conversation_id = c.id AND deleted = 0 ORDER BY created_at DESC LIMIT 1) as last_message,
       (SELECT type FROM messages WHERE conversation_id = c.id AND deleted = 0 ORDER BY created_at DESC LIMIT 1) as last_message_type,
       (SELECT created_at FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
-      (SELECT COUNT(*) FROM messages m 
-       WHERE m.conversation_id = c.id 
-       AND m.sender_id != ?
-       AND m.deleted = 0
-       AND m.id NOT IN (SELECT message_id FROM read_receipts WHERE user_id = ?)) as unread_count,
-      (SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id) as member_count
+      (SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.id) as member_count,
+      (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_id != $6 AND m.deleted = 0
+       AND m.id NOT IN (SELECT message_id FROM read_receipts WHERE user_id = $7)) as unread_count
     FROM conversations c
     JOIN conversation_members cm ON c.id = cm.conversation_id
-    WHERE cm.user_id = ?
-    ORDER BY last_message_time DESC
-  `).all(req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id);
-
-  res.json({ conversations });
+    WHERE cm.user_id = $8
+    ORDER BY last_message_time DESC NULLS LAST
+  `, [req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id]);
+  res.json({ conversations: result.rows });
 });
 
-// Get messages for a conversation
-router.get('/conversations/:id/messages', authenticateToken, (req, res) => {
+// Get messages
+router.get('/conversations/:id/messages', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { limit = 50, before } = req.query;
 
-  const member = db.prepare('SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(id, req.user.id);
-  if (!member) {
-    return res.status(403).json({ error: 'Not a member of this conversation' });
-  }
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [id, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
 
-  let query = `
-    SELECT m.*, u.username as sender_name, u.avatar as sender_avatar, u.chat_number as sender_chat_number,
-      rm.content as reply_content, rm.sender_id as reply_sender_id, ru.username as reply_sender_name
-    FROM messages m
-    JOIN users u ON m.sender_id = u.id
+  let sql = `SELECT m.*, u.username as sender_name, u.avatar as sender_avatar, u.chat_number as sender_chat_number,
+    rm.content as reply_content, rm.sender_id as reply_sender_id, ru.username as reply_sender_name
+    FROM messages m JOIN users u ON m.sender_id = u.id
     LEFT JOIN messages rm ON m.reply_to = rm.id
     LEFT JOIN users ru ON rm.sender_id = ru.id
-    WHERE m.conversation_id = ?
-  `;
-  const params = [id];
+    WHERE m.conversation_id = $1`;
+  let params = [id];
+  let paramIdx = 2;
 
-  if (before) {
-    query += ' AND m.id < ?';
-    params.push(before);
-  }
-
-  query += ' ORDER BY m.created_at DESC LIMIT ?';
+  if (before) { sql += ' AND m.id < $' + paramIdx; params.push(before); paramIdx++; }
+  sql += ' ORDER BY m.created_at DESC LIMIT $' + paramIdx;
   params.push(parseInt(limit));
 
-  const messages = db.prepare(query).all(...params).reverse();
+  const messages = await query(sql, params);
+  const msgs = messages.rows.reverse();
+  const messageIds = msgs.map(m => m.id);
 
-  // Get reactions for messages
-  const messageIds = messages.map(m => m.id);
   let reactions = [];
-  if (messageIds.length > 0) {
-    reactions = db.prepare(`
-      SELECT r.message_id, r.emoji, r.user_id, u.username 
-      FROM reactions r
-      JOIN users u ON r.user_id = u.id
-      WHERE r.message_id IN (${messageIds.join(',')})
-    `).all();
-  }
-
-  // Get read receipts
   let receipts = [];
   if (messageIds.length > 0) {
-    receipts = db.prepare(`
-      SELECT rr.message_id, rr.user_id, u.username, rr.read_at FROM read_receipts rr
-      JOIN users u ON rr.user_id = u.id
-      WHERE rr.message_id IN (${messageIds.join(',')})
-    `).all();
+    const rResult = await query(`SELECT r.message_id, r.emoji, r.user_id, u.username FROM reactions r JOIN users u ON r.user_id = u.id WHERE r.message_id = ANY($1)`, [messageIds]);
+    reactions = rResult.rows;
+    const rrResult = await query(`SELECT rr.message_id, rr.user_id, u.username FROM read_receipts rr JOIN users u ON rr.user_id = u.id WHERE rr.message_id = ANY($1)`, [messageIds]);
+    receipts = rrResult.rows;
   }
 
-  res.json({ messages, reactions, receipts });
-});
-
-// Edit message
-router.put('/messages/:id', authenticateToken, (req, res) => {
-  const { content } = req.body;
-  const msg = db.prepare('SELECT * FROM messages WHERE id = ? AND sender_id = ?').get(req.params.id, req.user.id);
-  if (!msg) return res.status(404).json({ error: 'Message not found or not yours' });
-  if (msg.type !== 'text') return res.status(400).json({ error: 'Can only edit text messages' });
-  
-  db.prepare('UPDATE messages SET content = ?, edited = 1 WHERE id = ?').run(content, req.params.id);
-  res.json({ message: 'Message updated', id: msg.id, content, edited: 1, conversation_id: msg.conversation_id });
-});
-
-// Forward message
-router.post('/messages/:id/forward', authenticateToken, (req, res) => {
-  const { conversation_ids } = req.body;
-  const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
-  if (!msg) return res.status(404).json({ error: 'Message not found' });
-
-  const forwarded = [];
-  for (const convId of conversation_ids) {
-    const member = db.prepare('SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(convId, req.user.id);
-    if (!member) continue;
-
-    const result = db.prepare(
-      'INSERT INTO messages (conversation_id, sender_id, content, type, file_url, file_name, forwarded_from) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(convId, req.user.id, msg.content, msg.type, msg.file_url, msg.file_name, msg.id);
-    forwarded.push({ conversation_id: convId, message_id: result.lastInsertRowid });
-  }
-
-  res.json({ forwarded });
-});
-
-// Get message info (read by)
-router.get('/messages/:id/info', authenticateToken, (req, res) => {
-  const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
-  if (!msg) return res.status(404).json({ error: 'Message not found' });
-
-  const readBy = db.prepare(`
-    SELECT u.username, u.avatar, rr.read_at 
-    FROM read_receipts rr
-    JOIN users u ON rr.user_id = u.id
-    WHERE rr.message_id = ?
-  `).all(req.params.id);
-
-  res.json({ message: msg, read_by: readBy });
+  res.json({ messages: msgs, reactions, receipts });
 });
 
 // Search messages
-router.get('/messages/search', authenticateToken, (req, res) => {
+router.get('/messages/search', authenticateToken, async (req, res) => {
   const { q } = req.query;
   if (!q) return res.json({ messages: [] });
-
-  const messages = db.prepare(`
-    SELECT m.*, u.username as sender_name, c.name as conv_name,
+  const result = await query(`
+    SELECT m.*, u.username as sender_name,
       CASE WHEN c.type = 'private' THEN (
-        SELECT u2.username FROM users u2
-        JOIN conversation_members cm2 ON u2.id = cm2.user_id
-        WHERE cm2.conversation_id = c.id AND u2.id != ?
+        SELECT u2.username FROM users u2 JOIN conversation_members cm2 ON u2.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u2.id != $1
       ) ELSE c.name END as display_conv_name
-    FROM messages m
-    JOIN users u ON m.sender_id = u.id
-    JOIN conversations c ON m.conversation_id = c.id
+    FROM messages m JOIN users u ON m.sender_id = u.id JOIN conversations c ON m.conversation_id = c.id
     JOIN conversation_members cm ON c.id = cm.conversation_id
-    WHERE cm.user_id = ? AND m.content LIKE ? AND m.deleted = 0
-    ORDER BY m.created_at DESC
-    LIMIT 30
-  `).all(req.user.id, req.user.id, `%${q}%`);
-
-  res.json({ messages });
+    WHERE cm.user_id = $2 AND m.content LIKE $3 AND m.deleted = 0
+    ORDER BY m.created_at DESC LIMIT 30
+  `, [req.user.id, req.user.id, '%'+q+'%']);
+  res.json({ messages: result.rows });
 });
 
-// Delete message
-router.delete('/messages/:id', authenticateToken, (req, res) => {
-  const msg = db.prepare('SELECT * FROM messages WHERE id = ? AND sender_id = ?').get(req.params.id, req.user.id);
-  if (!msg) return res.status(404).json({ error: 'Message not found or not yours' });
+// Edit message
+router.put('/messages/:id', authenticateToken, async (req, res) => {
+  const msgResult = await query('SELECT * FROM messages WHERE id = $1 AND sender_id = $2', [req.params.id, req.user.id]);
+  if (msgResult.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+  await query('UPDATE messages SET content = $1, edited = 1 WHERE id = $2', [req.body.content, req.params.id]);
+  res.json({ message: 'Edited' });
+});
 
-  db.prepare('UPDATE messages SET deleted = 1, content = NULL, file_url = NULL, file_name = NULL WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Deleted' });
+// Forward message
+router.post('/messages/:id/forward', authenticateToken, async (req, res) => {
+  const msgResult = await query('SELECT * FROM messages WHERE id = $1', [req.params.id]);
+  if (msgResult.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+  res.json({ message: 'Forwarded' });
+});
+
+// Message info
+router.get('/messages/:id/info', authenticateToken, async (req, res) => {
+  const msg = await query('SELECT * FROM messages WHERE id = $1', [req.params.id]);
+  if (msg.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+  const readBy = await query(`SELECT u.username, rr.read_at FROM read_receipts rr JOIN users u ON rr.user_id = u.id WHERE rr.message_id = $1`, [req.params.id]);
+  res.json({ message: msg.rows[0], read_by: readBy.rows });
 });
 
 // Upload file
 router.post('/upload', authenticateToken, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
-  res.json({ url: '/uploads/' + req.file.filename, name: req.file.originalname });
+  res.json({ url: '/uploads/' + req.file.filename, name: req.file.filename });
 });
 
 // Upload voice
@@ -449,66 +291,49 @@ router.post('/upload/voice', authenticateToken, uploadVoice.single('voice'), (re
 });
 
 // Get pinned messages
-router.get('/conversations/:id/pinned', authenticateToken, (req, res) => {
-  const pinned = db.prepare(`
-    SELECT pm.*, m.content, m.type, m.file_url, u.username as sender_name, pu.username as pinned_by_name
-    FROM pinned_messages pm
-    JOIN messages m ON pm.message_id = m.id
-    JOIN users u ON m.sender_id = u.id
-    JOIN users pu ON pm.pinned_by = pu.id
-    WHERE pm.conversation_id = ?
-    ORDER BY pm.created_at DESC
-  `).all(req.params.id);
-  res.json({ pinned });
+router.get('/conversations/:id/pinned', authenticateToken, async (req, res) => {
+  const result = await query(`
+    SELECT pm.*, m.content, m.type, u.username as sender_name, pb.username as pinned_by_name
+    FROM pinned_messages pm JOIN messages m ON pm.message_id = m.id
+    JOIN users u ON m.sender_id = u.id JOIN users pb ON pm.pinned_by = pb.id
+    WHERE pm.conversation_id = $1 ORDER BY pm.created_at DESC
+  `, [req.params.id]);
+  res.json({ pinned: result.rows });
 });
 
 // Block user
-router.post('/block', authenticateToken, (req, res) => {
+router.post('/block', authenticateToken, async (req, res) => {
   const { chat_number } = req.body;
-  const user = db.prepare('SELECT id, username FROM users WHERE chat_number = ?').get(chat_number);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  if (user.id === req.user.id) return res.status(400).json({ error: 'Cannot block yourself' });
-
-  try {
-    db.prepare('INSERT INTO blocked_users (blocker_id, blocked_id) VALUES (?, ?)').run(req.user.id, user.id);
-    res.json({ message: 'User blocked', user: { id: user.id, username: user.username } });
-  } catch (e) {
-    res.status(400).json({ error: 'Already blocked' });
-  }
+  const u = await query('SELECT id FROM users WHERE chat_number = $1', [chat_number]);
+  if (u.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+  await query('INSERT INTO blocked_users (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.user.id, u.rows[0].id]);
+  res.json({ message: 'Blocked' });
 });
 
 // Unblock user
-router.delete('/block/:userId', authenticateToken, (req, res) => {
-  db.prepare('DELETE FROM blocked_users WHERE blocker_id = ? AND blocked_id = ?').run(req.user.id, req.params.userId);
+router.post('/unblock', authenticateToken, async (req, res) => {
+  await query('DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2', [req.user.id, parseInt(req.body.user_id)]);
   res.json({ message: 'Unblocked' });
 });
 
 // Get blocked users
-router.get('/blocked', authenticateToken, (req, res) => {
-  const blocked = db.prepare(`
-    SELECT u.id, u.username, u.chat_number, u.avatar
-    FROM blocked_users bu
-    JOIN users u ON bu.blocked_id = u.id
-    WHERE bu.blocker_id = ?
-  `).all(req.user.id);
-  res.json({ blocked });
+router.get('/blocked', authenticateToken, async (req, res) => {
+  const result = await query('SELECT u.id, u.username, u.chat_number, u.avatar FROM blocked_users bu JOIN users u ON bu.blocked_id = u.id WHERE bu.blocker_id = $1', [req.user.id]);
+  res.json({ blocked: result.rows });
 });
 
-// Open view-once message
-router.post('/messages/:id/view-once', authenticateToken, (req, res) => {
-  const msgId = req.params.id;
-  const msg = db.prepare('SELECT * FROM messages WHERE id = ? AND view_once = 1 AND deleted = 0').get(msgId);
-  if (!msg) return res.status(404).json({ error: 'Message not found or already viewed' });
+// View once
+router.post('/messages/:id/view-once', authenticateToken, async (req, res) => {
+  const msgResult = await query('SELECT * FROM messages WHERE id = $1 AND view_once = 1 AND deleted = 0', [req.params.id]);
+  if (msgResult.rows.length === 0) return res.status(404).json({ error: 'Not found or already viewed' });
+  const msg = msgResult.rows[0];
 
-  // Check user is member of conversation
-  const member = db.prepare('SELECT id FROM conversation_members WHERE conversation_id = ? AND user_id = ?').get(msg.conversation_id, req.user.id);
-  if (!member) return res.status(403).json({ error: 'Not authorized' });
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [msg.conversation_id, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not authorized' });
 
-  // If not the sender, mark as deleted after returning content
   if (msg.sender_id !== req.user.id) {
-    db.prepare('UPDATE messages SET deleted = 1, content = ?, file_url = NULL, file_name = NULL WHERE id = ?').run('View once media opened', msgId);
+    await query('UPDATE messages SET deleted = 1, content = $1, file_url = NULL, file_name = NULL WHERE id = $2', ['View once media opened', req.params.id]);
   }
-
   res.json({ file_url: msg.file_url, type: msg.type, file_name: msg.file_name });
 });
 

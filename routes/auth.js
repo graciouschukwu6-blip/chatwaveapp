@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
-const db = require('../database');
+const { query } = require('../database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -29,11 +29,11 @@ const uploadAvatar = multer({
 });
 
 // Generate unique 8-digit chat number
-function generateChatNumber() {
+async function generateChatNumber() {
   while (true) {
     const num = Math.floor(10000000 + Math.random() * 90000000).toString();
-    const exists = db.prepare('SELECT id FROM users WHERE chat_number = ?').get(num);
-    if (!exists) return num;
+    const result = await query('SELECT id FROM users WHERE chat_number = $1', [num]);
+    if (result.rows.length === 0) return num;
   }
 }
 
@@ -48,29 +48,29 @@ router.post('/register', async (req, res) => {
     }
 
     if (rawPin.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      return res.status(400).json({ error: 'Must be at least 6 characters' });
     }
 
-    const existingUser = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email);
-    if (existingUser) {
+    const existing = await query('SELECT id FROM users WHERE username = $1 OR email = $2', [username, email]);
+    if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'Username or email already taken' });
     }
 
     const hashed = await bcrypt.hash(rawPin, 12);
-    const chatNumber = generateChatNumber();
+    const chatNumber = await generateChatNumber();
 
-    const result = db.prepare(
-      'INSERT INTO users (username, email, password, chat_number) VALUES (?, ?, ?, ?)'
-    ).run(username, email, hashed, chatNumber);
+    const result = await query(
+      'INSERT INTO users (username, email, pw_hash, chat_number) VALUES ($1, $2, $3, $4) RETURNING id',
+      [username, email, hashed, chatNumber]
+    );
 
-    const token = jwt.sign({ userId: result.lastInsertRowid }, process.env.JWT_SECRET, {
-      expiresIn: '7d'
-    });
+    const userId = result.rows[0].id;
+    const token = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
     res.status(201).json({ 
       message: 'Account created successfully',
-      user: { id: result.lastInsertRowid, username, email, chat_number: chatNumber, avatar: null, bio: '', status_message: '' },
+      user: { id: userId, username, email, chat_number: chatNumber, avatar: null, bio: '', status_message: '' },
       token 
     });
   } catch (err) {
@@ -88,22 +88,22 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    const user = db.prepare(
-      'SELECT * FROM users WHERE username = ? OR email = ? OR chat_number = ?'
-    ).get(login, login, login);
+    const result = await query(
+      'SELECT * FROM users WHERE username = $1 OR email = $2 OR chat_number = $3',
+      [login, login, login]
+    );
 
-    if (!user) {
+    if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const isMatch = await bcrypt.compare(rawPin, user.password);
+    const user = result.rows[0];
+    const isMatch = await bcrypt.compare(rawPin, user.pw_hash);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {
-      expiresIn: '7d'
-    });
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
     res.json({ 
@@ -128,44 +128,48 @@ router.get('/me', authenticateToken, (req, res) => {
 });
 
 // Update profile
-router.put('/profile', authenticateToken, (req, res) => {
-  const { username, bio, status_message } = req.body;
-  
-  if (username && username !== req.user.username) {
-    const exists = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, req.user.id);
-    if (exists) {
-      return res.status(400).json({ error: 'Username already taken' });
+router.put('/profile', authenticateToken, async (req, res) => {
+  try {
+    const { username, bio, status_message } = req.body;
+    
+    if (username && username !== req.user.username) {
+      const exists = await query('SELECT id FROM users WHERE username = $1 AND id != $2', [username, req.user.id]);
+      if (exists.rows.length > 0) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+      await query('UPDATE users SET username = $1 WHERE id = $2', [username, req.user.id]);
     }
-    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, req.user.id);
+    
+    if (bio !== undefined) {
+      await query('UPDATE users SET bio = $1 WHERE id = $2', [bio.substring(0, 200), req.user.id]);
+    }
+    
+    if (status_message !== undefined) {
+      await query('UPDATE users SET status_message = $1 WHERE id = $2', [status_message.substring(0, 100), req.user.id]);
+    }
+    
+    const updated = await query('SELECT id, username, email, chat_number, avatar, bio, status_message FROM users WHERE id = $1', [req.user.id]);
+    res.json({ user: updated.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error: ' + err.message });
   }
-  
-  if (bio !== undefined) {
-    db.prepare('UPDATE users SET bio = ? WHERE id = ?').run(bio.substring(0, 200), req.user.id);
-  }
-  
-  if (status_message !== undefined) {
-    db.prepare('UPDATE users SET status_message = ? WHERE id = ?').run(status_message.substring(0, 100), req.user.id);
-  }
-  
-  const updated = db.prepare('SELECT id, username, email, chat_number, avatar, bio, status_message FROM users WHERE id = ?').get(req.user.id);
-  res.json({ user: updated });
 });
 
 // Upload avatar
-router.post('/avatar', authenticateToken, uploadAvatar.single('avatar'), (req, res) => {
+router.post('/avatar', authenticateToken, uploadAvatar.single('avatar'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
   const avatarUrl = '/uploads/avatars/' + req.file.filename;
-  db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(avatarUrl, req.user.id);
+  await query('UPDATE users SET avatar = $1 WHERE id = $2', [avatarUrl, req.user.id]);
   res.json({ avatar: avatarUrl });
 });
 
 // Get user profile by id
-router.get('/users/:id', authenticateToken, (req, res) => {
-  const user = db.prepare('SELECT id, username, chat_number, avatar, bio, status_message, status, last_seen, created_at FROM users WHERE id = ?').get(req.params.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ user });
+router.get('/users/:id', authenticateToken, async (req, res) => {
+  const result = await query('SELECT id, username, chat_number, avatar, bio, status_message, status, last_seen, created_at FROM users WHERE id = $1', [req.params.id]);
+  if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+  res.json({ user: result.rows[0] });
 });
 
 module.exports = router;

@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
+const { initDb } = require('./database');
 const { authenticateSocket } = require('./middleware/auth');
 const { setupSocket } = require('./socket/handler');
 
@@ -49,6 +50,13 @@ app.get('/app', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log('ChatWave running on http://localhost:' + PORT);
+
+// Initialize DB then start server
+initDb().then(() => {
+  server.listen(PORT, () => {
+    console.log('ChatWave running on http://localhost:' + PORT);
+  });
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });

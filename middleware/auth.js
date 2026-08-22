@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
-const db = require('../database');
+const { query } = require('../database');
 
-function authenticateToken(req, res, next) {
+async function authenticateToken(req, res, next) {
   const token = req.cookies?.token || req.headers['authorization']?.split(' ')[1];
   
   if (!token) {
@@ -10,20 +10,20 @@ function authenticateToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = db.prepare('SELECT id, username, email, chat_number, avatar, bio, status_message, status FROM users WHERE id = ?').get(decoded.userId);
+    const result = await query('SELECT id, username, email, chat_number, avatar, bio, status_message, status FROM users WHERE id = $1', [decoded.userId]);
     
-    if (!user) {
+    if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid token. User not found.' });
     }
     
-    req.user = user;
+    req.user = result.rows[0];
     next();
   } catch (err) {
     return res.status(403).json({ error: 'Invalid or expired token.' });
   }
 }
 
-function authenticateSocket(socket, next) {
+async function authenticateSocket(socket, next) {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.cookie?.split('token=')[1]?.split(';')[0];
   
   if (!token) {
@@ -32,13 +32,13 @@ function authenticateSocket(socket, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = db.prepare('SELECT id, username, email, chat_number, avatar, bio, status_message FROM users WHERE id = ?').get(decoded.userId);
+    const result = await query('SELECT id, username, email, chat_number, avatar, bio, status_message FROM users WHERE id = $1', [decoded.userId]);
     
-    if (!user) {
+    if (result.rows.length === 0) {
       return next(new Error('User not found'));
     }
     
-    socket.user = user;
+    socket.user = result.rows[0];
     next();
   } catch (err) {
     return next(new Error('Invalid token'));
