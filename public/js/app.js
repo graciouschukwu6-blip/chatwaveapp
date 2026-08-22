@@ -479,7 +479,7 @@ async function updateMessageReactions(msgId) {
 // ===== EVENT LISTENERS =====
 function setupEventListeners() {
   // Theme toggle
-  document.getElementById('themeToggleApp').addEventListener('click', () => {
+  document.getElementById('themeToggle').addEventListener('click', () => {
     setTheme(getTheme() === 'dark' ? 'light' : 'dark');
   });
 
@@ -576,7 +576,7 @@ function setupEventListeners() {
   // Chat info
   document.getElementById('chatInfoBtn').addEventListener('click', showChatInfo);
   document.getElementById('closeInfo').addEventListener('click', () => { document.getElementById('infoPanel').style.display = 'none'; });
-  document.getElementById('chatUserInfoBtn').addEventListener('click', viewChatUserProfile);
+  if (document.getElementById('chatUserInfoBtn')) document.getElementById('chatUserInfoBtn').addEventListener('click', viewChatUserProfile);
 
   // Pinned
   document.getElementById('pinnedBtn').addEventListener('click', showPinnedPanel);
@@ -613,11 +613,11 @@ function setupEventListeners() {
 
   // Forward modal
   document.getElementById('closeForward').addEventListener('click', () => hideModal('forwardModal'));
-  document.getElementById('confirmForward').addEventListener('click', confirmForward);
+  document.getElementById('forwardSendBtn').addEventListener('click', confirmForward);
 
   // Edit modal
   document.getElementById('closeEdit').addEventListener('click', () => hideModal('editModal'));
-  document.getElementById('confirmEdit').addEventListener('click', confirmEdit);
+  document.getElementById('editSaveBtn').addEventListener('click', confirmEdit);
 
   // User view modal
   document.getElementById('closeUserView').addEventListener('click', () => hideModal('userViewModal'));
@@ -811,12 +811,12 @@ function openEditModal() {
   if (!msgEl) return;
   const content = msgEl.querySelector('.msg-content')?.textContent || '';
   editingMessageId = contextMessageId;
-  document.getElementById('editMsgInput').value = content;
+  document.getElementById('editInput').value = content;
   showModal('editModal');
 }
 
 function confirmEdit() {
-  const content = document.getElementById('editMsgInput').value.trim();
+  const content = document.getElementById('editInput').value.trim();
   if (!content || !editingMessageId) return;
   socket.emit('edit_message', {
     message_id: editingMessageId,
@@ -831,7 +831,7 @@ function confirmEdit() {
 function openForwardModal() {
   forwardMessageId = contextMessageId;
   selectedForwardConvs = [];
-  const list = document.getElementById('forwardList');
+  const list = document.getElementById('forwardConvsList');
   list.innerHTML = '';
   conversations.forEach(conv => {
     const item = document.createElement('div');
@@ -1015,21 +1015,23 @@ async function viewChatUserProfile() {
 }
 
 function showUserProfile(user) {
-  const av = document.getElementById('viewAvatar');
-  av.textContent = user.username.charAt(0).toUpperCase();
-  if (user.avatar) {
-    av.style.backgroundImage = 'url(' + user.avatar + ')';
-    av.style.backgroundSize = 'cover';
-    av.textContent = '';
-  } else {
-    av.style.backgroundImage = '';
-  }
-  document.getElementById('viewUsername').textContent = user.username;
-  document.getElementById('viewChatNum').textContent = '#' + user.chat_number;
-  document.getElementById('viewBio').textContent = user.bio || '';
-  document.getElementById('viewStatusMsg').textContent = user.status_message || '';
-  document.getElementById('viewStatus').textContent = user.status === 'online' ? 'Online' : 'Last seen ' + formatLastSeen(user.last_seen);
-  document.getElementById('viewJoined').textContent = 'Joined ' + new Date(user.created_at).toLocaleDateString();
+  var body = document.getElementById('userViewBody');
+  var avStyle = user.avatar ? 'background-image:url(' + user.avatar + ');background-size:cover;' : '';
+  var avText = user.avatar ? '' : user.username.charAt(0).toUpperCase();
+  var statusText = user.status === 'online' ? 'Online' : 'Last seen ' + formatLastSeen(user.last_seen);
+  var joined = user.created_at ? 'Joined ' + new Date(user.created_at).toLocaleDateString() : '';
+
+  body.innerHTML = '<div style="text-align:center;padding:20px 0;">' +
+    '<div class="profile-avatar" style="width:80px;height:80px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;background:var(--surface);' + avStyle + '">' + avText + '</div>' +
+    '<h3 style="margin-bottom:4px;">' + escapeHtml(user.username) + '</h3>' +
+    '<p style="color:var(--text-muted);font-size:13px;">#' + user.chat_number + '</p>' +
+    '<p style="color:var(--accent);font-size:13px;margin-top:4px;">' + statusText + '</p>' +
+    '</div>' +
+    '<div style="padding:0 20px;">' +
+    (user.bio ? '<div style="margin-bottom:12px;"><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Bio</label><p style="font-size:14px;">' + escapeHtml(user.bio) + '</p></div>' : '') +
+    (user.status_message ? '<div style="margin-bottom:12px;"><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Status</label><p style="font-size:14px;">' + escapeHtml(user.status_message) + '</p></div>' : '') +
+    '<p style="font-size:12px;color:var(--text-muted);margin-top:16px;">' + joined + '</p>' +
+    '</div>';
   showModal('userViewModal');
 }
 
