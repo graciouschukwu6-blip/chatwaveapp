@@ -46,10 +46,6 @@ app.get('/', (req, res) => {
 });
 
 app.get('/app', (req, res) => {
-  const token = req.cookies?.token || req.query?.token;
-  if (!token) {
-    return res.redirect('/');
-  }
   res.sendFile(path.join(__dirname, 'views', 'app.html'));
 });
 
