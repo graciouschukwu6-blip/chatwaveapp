@@ -60,4 +60,19 @@ registerForm.addEventListener("submit", async function(e) {
   } catch (err) { showError("Connection error. Try again."); }
 });
 
-if (localStorage.getItem("token")) { window.location.href = "/app"; }
+// Only redirect to /app if token is valid
+(async function() {
+  var savedToken = localStorage.getItem("token");
+  if (savedToken) {
+    try {
+      var res = await fetch("/api/auth/me", { headers: { "Authorization": "Bearer " + savedToken } });
+      if (res.ok) {
+        window.location.href = "/app";
+      } else {
+        localStorage.clear();
+      }
+    } catch(e) {
+      localStorage.clear();
+    }
+  }
+})();
