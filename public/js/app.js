@@ -1533,6 +1533,7 @@ function renderStatusBar() {
 
 function openStatusCreate() {
   showModal('statusCreateModal');
+  loadStatusFriends();
   statusType = 'text';
   statusMediaFile = null;
   selectedGradient = STATUS_GRADIENTS[0];
@@ -1632,6 +1633,64 @@ document.getElementById('postStatusBtn').addEventListener('click', async functio
 
 // Close status create
 document.getElementById('closeStatusCreate').addEventListener('click', function() { hideModal('statusCreateModal'); });
+
+// Status @mention autocomplete
+var statusFriends = [];
+async function loadStatusFriends() {
+  try {
+    var res = await fetch('/api/chat/conversations', { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    var friendMap = {};
+    (data.conversations || []).forEach(function(c) {
+      if (c.type === 'private' && c.display_name) {
+        friendMap[c.display_name] = { username: c.display_name, chat_number: c.display_chat_number };
+      }
+    });
+    statusFriends = Object.values(friendMap);
+  } catch(e) { statusFriends = []; }
+}
+
+function handleStatusMention(inputEl) {
+  var val = inputEl.value;
+  var cursorPos = inputEl.selectionStart;
+  var textBefore = val.substring(0, cursorPos);
+  var atMatch = textBefore.match(/@(\w*)$/);
+  var dropdown = document.getElementById('statusMentionDropdown');
+  if (atMatch) {
+    var query = atMatch[1].toLowerCase();
+    var filtered = statusFriends.filter(function(f) {
+      return f.username.toLowerCase().startsWith(query);
+    }).slice(0, 6);
+    if (filtered.length === 0) { dropdown.style.display = 'none'; return; }
+    dropdown.innerHTML = filtered.map(function(f) {
+      return '<div class="mention-option" data-name="' + escapeHtml(f.username) + '">@' + escapeHtml(f.username) + '</div>';
+    }).join('');
+    dropdown.style.display = 'block';
+    dropdown.setAttribute('data-target', inputEl.id);
+  } else {
+    dropdown.style.display = 'none';
+  }
+}
+
+document.getElementById('statusTextInput').addEventListener('input', function() { handleStatusMention(this); });
+document.getElementById('statusCaptionInput').addEventListener('input', function() { handleStatusMention(this); });
+
+document.getElementById('statusMentionDropdown').addEventListener('click', function(e) {
+  if (e.target.classList.contains('mention-option')) {
+    var name = e.target.getAttribute('data-name');
+    var targetId = this.getAttribute('data-target');
+    var input = document.getElementById(targetId);
+    var val = input.value;
+    var cursorPos = input.selectionStart;
+    var textBefore = val.substring(0, cursorPos);
+    var textAfter = val.substring(cursorPos);
+    var newBefore = textBefore.replace(/@\w*$/, '@' + name + ' ');
+    input.value = newBefore + textAfter;
+    input.focus();
+    input.selectionStart = input.selectionEnd = newBefore.length;
+    this.style.display = 'none';
+  }
+});
 
 // Status Viewer
 async function openStatusViewer(userId) {
@@ -1813,19 +1872,32 @@ async function sendStatusReply() {
     });
     var data = await res.json();
     if (data.conversation_id) {
-      // Send the reply as a message with status reference
-      var statusRef = s.type === 'text' ? s.content.substring(0, 50) : (s.type === 'image' ? 'Photo' : 'Video');
+      // Build WhatsApp-style status reference
+      var statusRef = '';
+      if (s.type === 'text') {
+        statusRef = s.content.substring(0, 60);
+      } else if (s.type === 'image') {
+        statusRef = '\u{1F4F7} Photo';
+      } else {
+        statusRef = '\u{1F3AC} Video';
+      }
+      var replyContent = '\u{1F4AC} Replied to status: "' + statusRef + '"\n\n' + text;
       socket.emit('send_message', {
         conversation_id: data.conversation_id,
-        content: text,
+        content: replyContent,
         type: 'text',
         reply_to: null
       });
       input.value = '';
-      alert('Reply sent to ' + currentStatusUser.username);
+      closeStatusViewer();
+      // Open the conversation
+      currentConversation = { id: data.conversation_id, type: 'private', display_name: currentStatusUser.username };
+      await loadConversations();
+      var conv = conversations.find(function(c) { return c.id === data.conversation_id; });
+      if (conv) openConversation(conv);
     }
   } catch(e) {
-    alert('Failed to send reply');
+    console.error('Failed to send status reply', e);
   }
 }
 

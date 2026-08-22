@@ -952,6 +952,20 @@ body {
 }
 .view-once-viewer-content { display: flex; align-items: center; justify-content: center; }
 
+/* Status Mention Dropdown */
+.status-mention-dropdown {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.status-mention-dropdown .mention-option { padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--text); }
+.status-mention-dropdown .mention-option:hover { background: var(--surface-hover); }
+
 /* Mention highlights */
 .mention {
   background: rgba(102,126,234,0.2);
