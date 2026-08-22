@@ -3301,6 +3301,53 @@ async function addCommunityGroup() {
   if (addGroupBtn) addGroupBtn.addEventListener('click', addCommunityGroup);
 })();
 
+// ===== NAV BAR SWITCHING =====
+
+(function initNavBar() {
+  var navItems = document.querySelectorAll('.nav-item[data-nav]');
+  navItems.forEach(function(item) {
+    item.addEventListener('click', function() {
+      var view = item.dataset.nav;
+      switchNavView(view);
+    });
+  });
+})();
+
+function switchNavView(view) {
+  // Update nav active state
+  var navItems = document.querySelectorAll('.nav-item[data-nav]');
+  navItems.forEach(function(item) {
+    item.classList.toggle('active', item.dataset.nav === view);
+  });
+
+  // Hide all sidebar views
+  var views = document.querySelectorAll('.sidebar-view');
+  views.forEach(function(v) { v.classList.remove('active'); v.style.display = 'none'; });
+
+  // Show selected view
+  var viewMap = {
+    'chats': 'chatsView',
+    'status': 'statusView',
+    'channels': 'channelsView',
+    'communities': 'communitiesView',
+    'settings': 'settingsView'
+  };
+
+  var targetId = viewMap[view];
+  var target = document.getElementById(targetId);
+  if (target) { target.classList.add('active'); target.style.display = 'flex'; }
+
+  // Load content for the view
+  if (view === 'status') { if (typeof loadStatuses === 'function') loadStatuses(); }
+  if (view === 'channels') { loadSubscribedChannels(); }
+  if (view === 'communities') { if (typeof loadCommunities === 'function') loadCommunities(); }
+}
+
+function loadSubscribedChannels() {
+  // Channels the user is subscribed to are already in the conversations list
+  // This is a placeholder — channels show in the channelsList div
+}
+
 // ===== VOICE & VIDEO CALLS (WebRTC) =====
 
 var callState = {
