@@ -61,6 +61,8 @@
             </div>
           </div>
           <div class="chat-header-actions">
+            <button class="icon-btn call-header-btn" id="voiceCallBtn" title="Voice Call" style="display:none;" onclick="initiateCall('voice')">&#128222;</button>
+            <button class="icon-btn call-header-btn" id="videoCallBtn" title="Video Call" style="display:none;" onclick="initiateCall('video')">&#128249;</button>
             <button class="icon-btn" id="chatSearchBtn" title="Search in chat">&#128269;</button>
             <button class="icon-btn" id="pinnedBtn" title="Pinned Messages">&#128204;</button>
             <button class="icon-btn" id="chatInfoBtn" title="Info">i</button>
@@ -574,6 +576,46 @@
         <button class="close-modal" id="closeChannelsDiscover">&#10005;</button>
       </div>
       <div id="channelsDiscoverList"></div>
+    </div>
+  </div>
+
+  <!-- Incoming Call Overlay -->
+  <div id="incomingCallOverlay" class="call-overlay" style="display:none;">
+    <div class="call-incoming-card">
+      <div class="call-pulse-ring"></div>
+      <div class="call-avatar" id="incomingCallAvatar"></div>
+      <h3 id="incomingCallName">Unknown</h3>
+      <p id="incomingCallType" class="call-type-label">Incoming voice call...</p>
+      <div class="call-incoming-actions">
+        <button class="call-btn call-btn-reject" id="rejectCallBtn" title="Decline">&#10006;</button>
+        <button class="call-btn call-btn-accept" id="acceptCallBtn" title="Accept">&#10004;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Call Overlay -->
+  <div id="activeCallOverlay" class="call-overlay" style="display:none;">
+    <div class="call-active-screen">
+      <div class="call-status-bar">
+        <span id="callStatus">Calling...</span>
+        <span id="callTimer" style="display:none;">00:00</span>
+      </div>
+      <div class="call-center-area">
+        <div id="callVoiceView" class="call-voice-view">
+          <div class="call-avatar-large" id="activeCallAvatar"></div>
+          <h2 id="activeCallName">User</h2>
+          <div class="call-sound-waves" id="callSoundWaves">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+        <video id="remoteVideo" class="call-remote-video" autoplay playsinline></video>
+        <video id="localVideo" class="call-local-video" autoplay playsinline muted></video>
+      </div>
+      <div class="call-controls">
+        <button class="call-ctrl-btn" id="toggleMicBtn" title="Mute">&#127908;</button>
+        <button class="call-ctrl-btn" id="toggleCamBtn" title="Camera" style="display:none;">&#128247;</button>
+        <button class="call-ctrl-btn call-end-btn" id="endCallBtn" title="End Call">&#128383;</button>
+      </div>
     </div>
   </div>
 

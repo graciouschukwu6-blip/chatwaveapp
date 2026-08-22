@@ -219,6 +219,18 @@ async function initDb() {
       conversation_id INTEGER NOT NULL REFERENCES conversations(id),
       UNIQUE(community_id, conversation_id)
     );
+
+    CREATE TABLE IF NOT EXISTS call_logs (
+      id SERIAL PRIMARY KEY,
+      conversation_id INTEGER REFERENCES conversations(id),
+      caller_id INTEGER NOT NULL REFERENCES users(id),
+      callee_id INTEGER NOT NULL REFERENCES users(id),
+      type TEXT DEFAULT 'voice',
+      status TEXT DEFAULT 'missed',
+      duration INTEGER DEFAULT 0,
+      started_at TIMESTAMP DEFAULT NOW(),
+      ended_at TIMESTAMP DEFAULT NULL
+    );
   `);
 
   // Add columns if they don't exist (safe migration for existing DBs)

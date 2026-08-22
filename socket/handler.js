@@ -1,6 +1,8 @@
 const { query } = require('../database');
 
 const onlineUsers = new Map();
+// Track active calls: { callId: { callerId, calleeId, conversationId, type, startedAt } }
+const activeCalls = new Map();
 
 // Fetch link preview metadata
 async function fetchLinkPreview(url) {
@@ -308,6 +310,129 @@ function setupSocket(io) {
     socket.on('member_joined', (data) => {
       io.to('conv_' + data.conversation_id).emit('member_joined', data);
       socket.join('conv_' + data.conversation_id);
+    });
+
+    // ===== VOICE & VIDEO CALLS (WebRTC Signaling) =====
+
+    // Initiate a call
+    socket.on('call:initiate', async (data) => {
+      try {
+        const { to_user_id, type, conversation_id } = data;
+        const calleeSocketId = onlineUsers.get(to_user_id);
+
+        // Log the call
+        const logResult = await query(
+          'INSERT INTO call_logs (conversation_id, caller_id, callee_id, type, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+          [conversation_id, user.id, to_user_id, type, 'missed']
+        );
+        const callId = logResult.rows[0].id;
+
+        // Store active call
+        activeCalls.set(callId, {
+          callerId: user.id,
+          calleeId: to_user_id,
+          callerSocketId: socket.id,
+          calleeSocketId: calleeSocketId,
+          conversationId: conversation_id,
+          type,
+          startedAt: Date.now()
+        });
+
+        if (calleeSocketId) {
+          io.to(calleeSocketId).emit('call:incoming', {
+            call_id: callId,
+            caller_id: user.id,
+            caller_name: user.username,
+            caller_avatar: user.avatar,
+            type,
+            conversation_id
+          });
+        }
+
+        socket.emit('call:ringing', { call_id: callId, to_user_id });
+      } catch(e) { console.error('call:initiate error:', e); }
+    });
+
+    // Accept call
+    socket.on('call:accept', async (data) => {
+      const { call_id } = data;
+      const call = activeCalls.get(call_id);
+      if (!call) return;
+
+      call.calleeSocketId = socket.id;
+      await query('UPDATE call_logs SET status = $1 WHERE id = $2', ['active', call_id]);
+
+      const callerSocketId = onlineUsers.get(call.callerId);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:accepted', { call_id });
+      }
+    });
+
+    // Reject call
+    socket.on('call:reject', async (data) => {
+      const { call_id } = data;
+      const call = activeCalls.get(call_id);
+      if (!call) return;
+
+      await query('UPDATE call_logs SET status = $1, ended_at = NOW() WHERE id = $2', ['rejected', call_id]);
+      activeCalls.delete(call_id);
+
+      const callerSocketId = onlineUsers.get(call.callerId);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:rejected', { call_id });
+      }
+    });
+
+    // End call
+    socket.on('call:end', async (data) => {
+      const { call_id, duration } = data;
+      const call = activeCalls.get(call_id);
+      if (!call) return;
+
+      const status = duration > 0 ? 'completed' : 'missed';
+      await query('UPDATE call_logs SET status = $1, duration = $2, ended_at = NOW() WHERE id = $3', [status, duration || 0, call_id]);
+      activeCalls.delete(call_id);
+
+      // Notify the other party
+      const otherUserId = user.id === call.callerId ? call.calleeId : call.callerId;
+      const otherSocketId = onlineUsers.get(otherUserId);
+      if (otherSocketId) {
+        io.to(otherSocketId).emit('call:ended', { call_id, duration });
+      }
+    });
+
+    // ICE candidate exchange
+    socket.on('call:ice-candidate', (data) => {
+      const { call_id, candidate } = data;
+      const call = activeCalls.get(call_id);
+      if (!call) return;
+      const otherUserId = user.id === call.callerId ? call.calleeId : call.callerId;
+      const otherSocketId = onlineUsers.get(otherUserId);
+      if (otherSocketId) {
+        io.to(otherSocketId).emit('call:ice-candidate', { call_id, candidate });
+      }
+    });
+
+    // SDP offer
+    socket.on('call:offer', (data) => {
+      const { call_id, offer } = data;
+      const call = activeCalls.get(call_id);
+      if (!call) return;
+      const calleeSocketId = onlineUsers.get(call.calleeId);
+      if (calleeSocketId) {
+        io.to(calleeSocketId).emit('call:offer', { call_id, offer });
+      }
+    });
+
+    // SDP answer
+    socket.on('call:answer', (data) => {
+      const { call_id, answer } = data;
+      const call = activeCalls.get(call_id);
+      if (!call) return;
+      const callerSocketId = onlineUsers.get(call.callerId);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:answer', { call_id, answer });
+      }
     });
 
     // Disconnect
