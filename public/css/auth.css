@@ -1,25 +1,25 @@
-/* AUTH PAGE STYLES */
+/* AUTH PAGE STYLES - WhatsApp Theme */
 :root {
-  --bg-primary: #0f0c29;
-  --bg-secondary: #302b63;
-  --bg-tertiary: #24243e;
-  --accent: #667eea;
-  --accent2: #764ba2;
-  --text: #ffffff;
-  --text-muted: rgba(255,255,255,0.6);
-  --glass: rgba(255,255,255,0.05);
-  --glass-border: rgba(255,255,255,0.1);
-  --error: #ef4444;
-  --success: #10b981;
+  --bg-primary: #111b21;
+  --bg-secondary: #202c33;
+  --bg-tertiary: #182229;
+  --accent: #00a884;
+  --accent2: #008069;
+  --text: #e9edef;
+  --text-muted: rgba(233,237,239,0.5);
+  --glass: rgba(255,255,255,0.04);
+  --glass-border: rgba(255,255,255,0.08);
+  --error: #ea0038;
+  --success: #00a884;
 }
 
 [data-theme="light"] {
-  --bg-primary: #f8f9fc;
-  --bg-secondary: #eef0f6;
-  --bg-tertiary: #e2e5ef;
-  --text: #1a1a2e;
-  --text-muted: rgba(26,26,46,0.6);
-  --glass: rgba(255,255,255,0.8);
+  --bg-primary: #f0f2f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8ebe5;
+  --text: #111b21;
+  --text-muted: rgba(17,27,33,0.5);
+  --glass: rgba(255,255,255,0.9);
   --glass-border: rgba(0,0,0,0.08);
 }
 
@@ -27,13 +27,24 @@
 
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: linear-gradient(135deg, var(--bg-primary), var(--bg-secondary), var(--bg-tertiary));
+  background: var(--bg-primary);
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text);
   overflow: hidden;
+  position: relative;
+}
+
+/* WhatsApp-style top banner */
+body::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 220px;
+  background: var(--accent);
+  z-index: 0;
 }
 
 .bg-animation {
@@ -46,8 +57,8 @@ body {
 .gradient-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.3;
+  filter: blur(100px);
+  opacity: 0.15;
   animation: float 20s ease-in-out infinite;
 }
 
@@ -67,7 +78,7 @@ body {
 
 .orb-3 {
   width: 200px; height: 200px;
-  background: #4facfe;
+  background: #25d366;
   top: 50%; left: 50%;
   animation-delay: -14s;
 }
@@ -88,18 +99,18 @@ body {
 }
 
 .auth-card {
-  background: var(--glass);
+  background: var(--bg-secondary);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
-  border-radius: 24px;
+  border-radius: 12px;
   padding: 48px 40px;
-  box-shadow: 0 25px 50px rgba(0,0,0,0.25);
-  animation: slideUp 0.6s ease;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  animation: slideUp 0.5s ease;
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(30px); }
+  from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -114,19 +125,16 @@ body {
   justify-content: center;
   width: 64px;
   height: 64px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  border-radius: 16px;
+  background: var(--accent);
+  border-radius: 50%;
   margin-bottom: 16px;
-  box-shadow: 0 8px 20px rgba(102,126,234,0.3);
+  box-shadow: 0 4px 12px rgba(0,168,132,0.3);
 }
 
 .logo h1 {
-  font-size: 32px;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .tagline {
@@ -144,8 +152,8 @@ body {
 }
 
 .auth-form h2 {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
   margin-bottom: 24px;
   text-align: center;
 }
@@ -167,41 +175,40 @@ body {
 .input-group input {
   width: 100%;
   padding: 14px 16px;
-  background: rgba(255,255,255,0.06);
+  background: var(--bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--text);
   font-size: 15px;
-  transition: all 0.3s;
+  transition: all 0.2s;
   outline: none;
 }
 
 [data-theme="light"] .input-group input {
-  background: rgba(0,0,0,0.03);
+  background: #f0f2f5;
 }
 
 .input-group input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
-  background: rgba(102,126,234,0.05);
+  box-shadow: 0 0 0 2px rgba(0,168,132,0.12);
 }
 
 .input-group input::placeholder {
   color: var(--text-muted);
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 .btn-primary {
   width: 100%;
   padding: 14px 24px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  background: var(--accent);
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   color: #fff;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -210,8 +217,9 @@ body {
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(102,126,234,0.4);
+  background: var(--accent2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,168,132,0.3);
 }
 
 .btn-primary:active { transform: translateY(0); }
@@ -232,11 +240,11 @@ body {
 .switch-text a:hover { text-decoration: underline; }
 
 .error-msg {
-  background: rgba(239,68,68,0.15);
-  border: 1px solid rgba(239,68,68,0.3);
-  color: #fca5a5;
+  background: rgba(234,0,56,0.1);
+  border: 1px solid rgba(234,0,56,0.25);
+  color: #f87171;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 13px;
   margin-top: 16px;
   display: none;
@@ -261,21 +269,21 @@ body {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: var(--glass);
+  background: rgba(255,255,255,0.1);
   backdrop-filter: blur(10px);
-  border: 1px solid var(--glass-border);
-  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s;
+  transition: all 0.2s;
   z-index: 100;
 }
 
 .theme-toggle:hover {
   transform: scale(1.1);
-  border-color: var(--accent);
+  background: rgba(255,255,255,0.15);
 }
 
 .moon-icon { display: none; }
@@ -283,6 +291,6 @@ body {
 [data-theme="light"] .moon-icon { display: block; }
 
 @media (max-width: 480px) {
-  .auth-card { padding: 36px 24px; border-radius: 20px; }
+  .auth-card { padding: 36px 24px; border-radius: 10px; }
   .container { padding: 16px; }
 }
