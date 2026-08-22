@@ -81,7 +81,13 @@ const replyPreview = document.getElementById('replyPreview');
 // ===== INIT =====
 function init() {
   document.getElementById('myUsername').textContent = currentUser.username;
-  document.getElementById('myChatNumber').textContent = '#' + currentUser.chat_number;
+  var chatNumEl = document.getElementById('myChatNumber');
+  if (chatNumEl) chatNumEl.textContent = '#' + currentUser.chat_number;
+  // Settings view
+  var settingsName = document.getElementById('settingsUsername');
+  if (settingsName) settingsName.textContent = currentUser.username;
+  var settingsNum = document.getElementById('settingsChatNum');
+  if (settingsNum) settingsNum.textContent = '#' + currentUser.chat_number;
   const myAv = document.getElementById('myAvatar');
   myAv.textContent = currentUser.username.charAt(0).toUpperCase();
   if (currentUser.avatar) {
@@ -1661,7 +1667,8 @@ async function loadStatusFeed() {
 }
 
 function renderStatusBar() {
-  var bar = document.getElementById('statusBar');
+  var bar = document.getElementById('statusBar') || document.getElementById('statusList');
+  if (!bar) { bar = document.getElementById('statusList'); }
   if (!bar) return;
   var html = '';
 
@@ -3311,6 +3318,31 @@ async function addCommunityGroup() {
       switchNavView(view);
     });
   });
+})();
+
+// Hook up new sidebar view buttons
+(function initSidebarViewButtons() {
+  // Status view - add status button & my status item
+  var addStatusBtn = document.getElementById('addStatusBtn');
+  if (addStatusBtn) addStatusBtn.addEventListener('click', function() { showModal('statusCreateModal'); });
+  var myStatusItem = document.getElementById('myStatusItem');
+  if (myStatusItem) myStatusItem.addEventListener('click', function() { showModal('statusCreateModal'); });
+
+  // Channels view - discover button
+  var discoverBtn = document.getElementById('discoverChannelsBtn');
+  if (discoverBtn) discoverBtn.addEventListener('click', function() { if (typeof discoverChannels === 'function') discoverChannels(); });
+
+  // Communities view - new community button
+  var newCommunityBtn = document.getElementById('newCommunityBtn');
+  if (newCommunityBtn) newCommunityBtn.addEventListener('click', function() { showModal('createCommunityModal'); });
+
+  // Settings view - profile button
+  var settingsProfileBtn = document.getElementById('settingsProfileBtn');
+  if (settingsProfileBtn) settingsProfileBtn.addEventListener('click', function() { if (typeof openProfileModal === 'function') openProfileModal(); });
+
+  // Settings - starred messages
+  var settingsStarredBtn = document.getElementById('settingsStarredBtn');
+  if (settingsStarredBtn) settingsStarredBtn.addEventListener('click', function() { if (typeof loadStarredMessages === 'function') loadStarredMessages(); });
 })();
 
 function switchNavView(view) {
