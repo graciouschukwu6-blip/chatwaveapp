@@ -32,6 +32,7 @@ async function initDb() {
       name TEXT DEFAULT NULL,
       group_avatar TEXT DEFAULT NULL,
       locked INTEGER DEFAULT 0,
+      disappearing_timer INTEGER DEFAULT 0,
       created_by INTEGER REFERENCES users(id),
       created_at TIMESTAMP DEFAULT NOW()
     );
@@ -41,6 +42,8 @@ async function initDb() {
       conversation_id INTEGER NOT NULL REFERENCES conversations(id),
       user_id INTEGER NOT NULL REFERENCES users(id),
       role TEXT DEFAULT 'member',
+      archived BOOLEAN DEFAULT FALSE,
+      muted_until TIMESTAMP DEFAULT NULL,
       joined_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(conversation_id, user_id)
     );
@@ -58,6 +61,8 @@ async function initDb() {
       deleted INTEGER DEFAULT 0,
       forwarded_from INTEGER DEFAULT NULL,
       view_once INTEGER DEFAULT 0,
+      expires_at TIMESTAMP DEFAULT NULL,
+      link_preview JSONB DEFAULT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
 
@@ -113,9 +118,63 @@ async function initDb() {
       viewed_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(status_id, viewer_id)
     );
+
+    CREATE TABLE IF NOT EXISTS starred_messages (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      message_id INTEGER NOT NULL REFERENCES messages(id),
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, message_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS polls (
+      id SERIAL PRIMARY KEY,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      creator_id INTEGER NOT NULL REFERENCES users(id),
+      question TEXT NOT NULL,
+      allow_multiple BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_options (
+      id SERIAL PRIMARY KEY,
+      poll_id INTEGER NOT NULL REFERENCES polls(id),
+      option_text TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      id SERIAL PRIMARY KEY,
+      poll_id INTEGER NOT NULL REFERENCES polls(id),
+      option_id INTEGER NOT NULL REFERENCES poll_options(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(poll_id, option_id, user_id)
+    );
   `);
+
+  // Add columns if they don't exist (safe migration for existing DBs)
+  const migrations = [
+    `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS disappearing_timer INTEGER DEFAULT 0`,
+    `ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP DEFAULT NULL`,
+    `ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NULL`,
+    `ALTER TABLE messages ADD COLUMN IF NOT EXISTS link_preview JSONB DEFAULT NULL`
+  ];
+
+  for (const m of migrations) {
+    try { await pool.query(m); } catch(e) { /* column may already exist */ }
+  }
 
   console.log('Database tables initialized');
 }
 
-module.exports = { pool, query, initDb };
+// Cleanup expired disappearing messages
+async function cleanupExpiredMessages() {
+  try {
+    const result = await pool.query('DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW()');
+    if (result.rowCount > 0) console.log(`Cleaned up ${result.rowCount} expired messages`);
+  } catch(e) { console.error('Cleanup error:', e.message); }
+}
+
+module.exports = { pool, query, initDb, cleanupExpiredMessages };

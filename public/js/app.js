@@ -16,6 +16,7 @@ let forwardMessageId = null;
 let selectedForwardConvs = [];
 let editingMessageId = null;
 let viewOnceActive = false;
+let starredMessageIds = [];
 
 const EMOJIS = ['\u{1F44D}','\u{2764}','\u{1F602}','\u{1F62E}','\u{1F622}','\u{1F621}','\u{1F525}','\u{1F44F}','\u{1F389}','\u{1F4AF}','\u{2705}','\u{274C}','\u{1F440}','\u{1F64F}','\u{1F4AA}','\u{1F60E}','\u{1F914}','\u{1F60D}','\u{1F480}','\u{1F973}','\u{1F62D}','\u{1FAE1}','\u{1F49C}','\u{1F92F}'];
 
@@ -117,20 +118,24 @@ function setupSocketEvents() {
 
   socket.on('new_message', (message) => {
     if (currentConversation && currentConversation.id === message.conversation_id) {
-      appendMessage(message);
+      appendMessage(message, [], [], starredMessageIds);
       scrollToBottom();
       if (message.sender_id !== currentUser.id) {
         socket.emit('mark_read', { conversation_id: message.conversation_id, message_ids: [message.id] });
       }
     }
     if (message.sender_id !== currentUser.id) {
-      // Check for mention
-      if (message.content && message.content.includes('@' + currentUser.username)) {
-        playSound('mention');
-      } else {
-        playSound('message');
+      // Check mute before playing sound
+      var msgConv = conversations.find(c => c.id === message.conversation_id);
+      var isMuted = msgConv && msgConv.muted_until && new Date(msgConv.muted_until) > new Date();
+      if (!isMuted) {
+        if (message.content && message.content.includes('@' + currentUser.username)) {
+          playSound('mention');
+        } else {
+          playSound('message');
+        }
+        showNotification(message.sender_name, message.content || 'Sent a file');
       }
-      showNotification(message.sender_name, message.content || 'Sent a file');
     }
     loadConversations();
   });
@@ -228,6 +233,19 @@ function setupSocketEvents() {
 
   socket.on('error_message', (data) => { alert(data.error); });
 
+  socket.on('poll_updated', (data) => {
+    // Re-render poll cards for this poll
+    document.querySelectorAll('.poll-card[data-poll-id="' + data.poll_id + '"]').forEach(function(card) {
+      loadPollCard(data.poll_id, card);
+    });
+  });
+
+  socket.on('disappearing_updated', (data) => {
+    if (currentConversation && data.conversation_id === currentConversation.id) {
+      currentConversation.disappearing_timer = data.timer;
+    }
+  });
+
   socket.on('connect_error', (err) => {
     if (err.message === 'Authentication error') {
       localStorage.clear();
@@ -250,7 +268,20 @@ async function loadConversations() {
 function renderConversations() {
   const searchVal = document.getElementById('searchConversations').value.toLowerCase();
   conversationsList.innerHTML = '';
-  let filtered = conversations;
+
+  // Separate archived
+  let archived = conversations.filter(c => c.archived);
+  let filtered = conversations.filter(c => !c.archived);
+
+  // Show archived header if any
+  if (archived.length > 0 && !searchVal) {
+    var archiveHeader = document.createElement('div');
+    archiveHeader.className = 'archived-header';
+    archiveHeader.innerHTML = '<span>&#128451; Archived</span><span class="archived-count">' + archived.length + '</span>';
+    archiveHeader.addEventListener('click', showArchivedChats);
+    conversationsList.appendChild(archiveHeader);
+  }
+
   if (searchVal) {
     filtered = conversations.filter(c => (c.display_name || '').toLowerCase().includes(searchVal));
   }
@@ -270,11 +301,13 @@ function renderConversations() {
     const avatarStyle = conv.display_avatar ? 'background-image:url(' + conv.display_avatar + ');background-size:cover;' : '';
     const avatarText = conv.display_avatar ? '' : initials;
 
+    var isMuted = conv.muted_until && new Date(conv.muted_until) > new Date();
+    var muteIcon = isMuted ? ' <span style="font-size:11px;opacity:0.5;">&#128263;</span>' : '';
     item.innerHTML = '<div class="conv-avatar" style="' + avatarStyle + '">' + avatarText +
       (isOnline ? '<span class="online-dot"></span>' : '') + '</div>' +
       '<div class="conv-info"><div class="conv-name">' + escapeHtml(conv.display_name || 'Unknown') +
       (conv.type === 'group' ? ' <span style="font-size:11px;color:var(--text-muted);">(' + conv.member_count + ')</span>' : '') +
-      '</div><div class="conv-last-msg">' + escapeHtml(lastMsg) + '</div></div>' +
+      muteIcon + '</div><div class="conv-last-msg">' + escapeHtml(lastMsg) + '</div></div>' +
       '<div class="conv-meta"><div class="conv-time">' + time + '</div>' +
       (conv.unread_count > 0 ? '<div class="conv-unread">' + conv.unread_count + '</div>' : '') + '</div>';
 
@@ -327,8 +360,13 @@ async function openConversation(conv) {
       groupMembers = memData.members || [];
     } catch(e) { groupMembers = []; }
     updateInputLockState();
+    // Show poll button for groups
+    var pollBtn = document.getElementById('pollBtn');
+    if (pollBtn) pollBtn.classList.add('poll-btn-visible');
   } else {
     groupMembers = [];
+    var pollBtn2 = document.getElementById('pollBtn');
+    if (pollBtn2) pollBtn2.classList.remove('poll-btn-visible');
   }
   if (window.innerWidth <= 768) sidebar.classList.add('hidden');
   socket.emit('join_conversation', { conversation_id: conv.id });
@@ -338,8 +376,9 @@ async function loadMessages(convId) {
   try {
     const res = await fetch('/api/chat/conversations/' + convId + '/messages', { headers: { 'Authorization': 'Bearer ' + token } });
     const data = await res.json();
+    starredMessageIds = data.starred || [];
     messagesContainer.innerHTML = '';
-    data.messages.forEach(msg => appendMessage(msg, data.reactions, data.receipts));
+    data.messages.forEach(msg => appendMessage(msg, data.reactions, data.receipts, starredMessageIds));
     scrollToBottom();
     // Mark unread as read
     const unread = data.messages.filter(m => m.sender_id !== currentUser.id).map(m => m.id);
@@ -367,7 +406,7 @@ function showPinnedBar(content) {
 }
 
 // ===== MESSAGE RENDERING =====
-function appendMessage(msg, allReactions, allReceipts) {
+function appendMessage(msg, allReactions, allReceipts, starredIds) {
   const isMine = msg.sender_id === currentUser.id;
   const div = document.createElement('div');
   div.className = 'message ' + (isMine ? 'sent' : 'received');
@@ -400,6 +439,8 @@ function appendMessage(msg, allReactions, allReceipts) {
     contentHtml = '<a href="' + msg.file_url + '" target="_blank" class="file-attachment">' +
       '<div class="file-icon">' + icon + '</div>' +
       '<div class="file-info"><span class="file-name">' + escapeHtml(msg.file_name || 'File') + '</span></div></a>';
+  } else if (msg.type === 'poll') {
+    contentHtml = '<div class="poll-card" data-poll-id="' + msg.content + '"><div class="poll-loading">&#128202; Loading poll...</div></div>';
   } else {
     contentHtml = escapeHtml(msg.content || '');
     contentHtml = linkify(contentHtml);
@@ -423,6 +464,9 @@ function appendMessage(msg, allReactions, allReceipts) {
 
   const time = msg.created_at ? formatMsgTime(msg.created_at) : '';
   let metaHtml = '<div class="msg-meta">';
+  var isStarred = starredIds && starredIds.includes(msg.id);
+  if (isStarred) metaHtml += '<span class="msg-star-icon">&#11088;</span>';
+  if (msg.expires_at) metaHtml += '<span class="msg-timer-icon" title="Disappearing">&#9201;</span>';
   if (msg.edited) metaHtml += '<span class="msg-edited">edited</span>';
   metaHtml += '<span class="msg-time">' + time + '</span>';
   if (isMine) metaHtml += '<span class="msg-status">Sent</span>';
@@ -438,7 +482,16 @@ function appendMessage(msg, allReactions, allReceipts) {
     reactionsHtml = '<div class="reactions" data-msg-id="' + msg.id + '">' + reactionsHtml + '</div>';
   }
 
-  div.innerHTML = avatarHtml + '<div class="msg-bubble">' + forwardedHtml + senderHtml + replyHtml + '<div class="msg-content">' + contentHtml + '</div>' + metaHtml + reactionsHtml + '</div>';
+  // Link preview
+  var linkPreviewHtml = '';
+  if (msg.link_preview && !msg.deleted) {
+    var lp = typeof msg.link_preview === 'string' ? JSON.parse(msg.link_preview) : msg.link_preview;
+    linkPreviewHtml = '<a href="' + escapeHtml(lp.url) + '" target="_blank" class="link-preview-card">' +
+      (lp.image ? '<img src="' + escapeHtml(lp.image) + '" class="link-preview-img" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
+      '<div class="link-preview-body"><span class="link-preview-title">' + escapeHtml(lp.title || '') + '</span><span class="link-preview-desc">' + escapeHtml(lp.description || '') + '</span><span class="link-preview-url">' + escapeHtml(lp.url || '').substring(0, 40) + '</span></div></a>';
+  }
+
+  div.innerHTML = avatarHtml + '<div class="msg-bubble">' + forwardedHtml + senderHtml + replyHtml + '<div class="msg-content">' + contentHtml + '</div>' + linkPreviewHtml + metaHtml + reactionsHtml + '</div>';
 
   // Context menu
   div.addEventListener('contextmenu', (e) => {
@@ -447,6 +500,11 @@ function appendMessage(msg, allReactions, allReceipts) {
   });
 
   messagesContainer.appendChild(div);
+
+  // Load poll if type is poll
+  if (msg.type === 'poll' && msg.content && !msg.deleted) {
+    loadPollCard(msg.content, div.querySelector('.poll-card'));
+  }
 }
 
 function buildReactionsHtml(reactions, msgId) {
@@ -641,6 +699,23 @@ function setupEventListeners() {
       }
     }
   });
+
+  // Starred messages
+  document.getElementById('starredBtn').addEventListener('click', openStarredModal);
+  document.getElementById('closeStarred').addEventListener('click', () => hideModal('starredModal'));
+
+  // Poll
+  document.getElementById('pollBtn').addEventListener('click', () => { if (currentConversation && currentConversation.type === 'group') showModal('pollModal'); });
+  document.getElementById('closePoll').addEventListener('click', () => hideModal('pollModal'));
+  document.getElementById('addPollOption').addEventListener('click', addPollOptionInput);
+  document.getElementById('createPollBtn').addEventListener('click', createPoll);
+
+  // Mute modal
+  document.getElementById('closeMute').addEventListener('click', () => hideModal('muteModal'));
+  document.querySelectorAll('.mute-option').forEach(btn => {
+    btn.addEventListener('click', () => muteConversation(btn.dataset.duration));
+  });
+
 }
 
 // ===== SEND MESSAGE =====
@@ -782,6 +857,7 @@ function handleContextAction(action) {
     case 'edit': openEditModal(); break;
     case 'forward': openForwardModal(); break;
     case 'react': showEmojiPicker(); break;
+    case 'star': toggleStarMessage(); break;
     case 'pin': pinMessage(); break;
     case 'info': showMessageInfo(); break;
     case 'delete': deleteMessage(); break;
@@ -1078,7 +1154,21 @@ async function unblockUser(userId) {
 async function showChatInfo() {
   const panel = document.getElementById('infoPanel');
   const body = document.getElementById('infoBody');
-  
+
+  // Common controls (archive, mute, disappearing)
+  var commonHtml = '<div class="info-actions" style="margin-bottom:16px;display:flex;flex-direction:column;gap:8px;">';
+  commonHtml += '<button class="btn-info-action" onclick="archiveConversation(' + currentConversation.id + ')">&#128451; ' + (currentConversation.archived ? 'Unarchive' : 'Archive') + ' Chat</button>';
+  commonHtml += '<button class="btn-info-action" onclick="openMuteModal()">&#128263; Mute Notifications</button>';
+  var timerVal = currentConversation.disappearing_timer || 0;
+  var timerLabel = timerVal === 0 ? 'Off' : (timerVal === 86400 ? '24 hours' : (timerVal === 604800 ? '7 days' : '90 days'));
+  commonHtml += '<div class="info-disappearing"><span style="font-size:13px;">&#9201; Disappearing messages: <strong>' + timerLabel + '</strong></span>';
+  commonHtml += '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">';
+  commonHtml += '<button class="btn-timer' + (timerVal === 0 ? ' active' : '') + '" onclick="setDisappearingTimer(0)">Off</button>';
+  commonHtml += '<button class="btn-timer' + (timerVal === 86400 ? ' active' : '') + '" onclick="setDisappearingTimer(86400)">24h</button>';
+  commonHtml += '<button class="btn-timer' + (timerVal === 604800 ? ' active' : '') + '" onclick="setDisappearingTimer(604800)">7d</button>';
+  commonHtml += '<button class="btn-timer' + (timerVal === 7776000 ? ' active' : '') + '" onclick="setDisappearingTimer(7776000)">90d</button>';
+  commonHtml += '</div></div></div><hr style="border:none;border-top:1px solid var(--border);margin-bottom:16px;">';
+
   if (currentConversation.type === 'group') {
     try {
       const res = await fetch('/api/chat/conversations/' + currentConversation.id + '/members', { headers: { 'Authorization': 'Bearer ' + token } });
@@ -1108,10 +1198,10 @@ async function showChatInfo() {
         }
         html += '</div>';
       });
-      body.innerHTML = html;
+      body.innerHTML = commonHtml + html;
     } catch(e) { body.innerHTML = '<p>Error loading info</p>'; }
   } else {
-    body.innerHTML = '<p style="text-align:center;color:var(--text-muted);">Private conversation</p>';
+    body.innerHTML = commonHtml + '<p style="text-align:center;color:var(--text-muted);">Private conversation</p>';
   }
   panel.style.display = 'flex';
 }
@@ -1947,3 +2037,225 @@ function formatStatusTime(dateStr) {
 
 // ===== START =====
 if (token && currentUser) { init(); }
+
+// ===== STAR MESSAGES =====
+async function toggleStarMessage() {
+  if (!contextMessageId) return;
+  try {
+    const res = await fetch('/api/chat/messages/' + contextMessageId + '/star', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    if (data.starred) {
+      starredMessageIds.push(contextMessageId);
+    } else {
+      starredMessageIds = starredMessageIds.filter(id => id !== contextMessageId);
+    }
+    // Update star icon in UI
+    var msgEl = document.querySelector('[data-msg-id="' + contextMessageId + '"]');
+    if (msgEl) {
+      var meta = msgEl.querySelector('.msg-meta');
+      var existing = meta.querySelector('.msg-star-icon');
+      if (data.starred && !existing) {
+        meta.insertAdjacentHTML('afterbegin', '<span class="msg-star-icon">&#11088;</span>');
+      } else if (!data.starred && existing) {
+        existing.remove();
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function openStarredModal() {
+  showModal('starredModal');
+  var list = document.getElementById('starredList');
+  list.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</p>';
+  try {
+    var res = await fetch('/api/chat/starred', { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    if (!data.messages || data.messages.length === 0) {
+      list.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px 20px;font-size:13px;">No starred messages</p>';
+      return;
+    }
+    list.innerHTML = '';
+    data.messages.forEach(function(msg) {
+      var item = document.createElement('div');
+      item.className = 'starred-item';
+      item.innerHTML = '<div class="starred-header"><span class="starred-sender">' + escapeHtml(msg.sender_name) + '</span><span class="starred-conv">' + escapeHtml(msg.conversation_name || '') + '</span></div>' +
+        '<div class="starred-content">' + escapeHtml(msg.content || (msg.type + ' message')).substring(0, 120) + '</div>' +
+        '<div class="starred-time">' + formatMsgTime(msg.created_at) + '</div>';
+      item.addEventListener('click', function() {
+        hideModal('starredModal');
+        var c = conversations.find(cv => cv.id === msg.conversation_id);
+        if (c) openConversation(c);
+      });
+      list.appendChild(item);
+    });
+  } catch(e) { list.innerHTML = '<p style="color:var(--error);text-align:center;padding:20px;">Failed to load</p>'; }
+}
+
+// ===== ARCHIVE =====
+async function archiveConversation(convId) {
+  try {
+    var res = await fetch('/api/chat/conversations/' + convId + '/archive', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+    });
+    var data = await res.json();
+    var conv = conversations.find(c => c.id === convId);
+    if (conv) conv.archived = data.archived;
+    renderConversations();
+  } catch(e) { console.error(e); }
+}
+
+function showArchivedChats() {
+  var archived = conversations.filter(c => c.archived);
+  conversationsList.innerHTML = '';
+  var backBtn = document.createElement('div');
+  backBtn.className = 'archived-header';
+  backBtn.innerHTML = '<span>&#8592; Back</span>';
+  backBtn.addEventListener('click', renderConversations);
+  conversationsList.appendChild(backBtn);
+
+  archived.forEach(function(conv) {
+    var item = document.createElement('div');
+    item.className = 'conversation-item';
+    var initials = conv.display_name ? conv.display_name.charAt(0).toUpperCase() : '?';
+    item.innerHTML = '<div class="conv-avatar">' + initials + '</div>' +
+      '<div class="conv-info"><div class="conv-name">' + escapeHtml(conv.display_name || 'Unknown') + '</div></div>' +
+      '<button class="btn-unarchive" title="Unarchive">&#128451;</button>';
+    item.querySelector('.btn-unarchive').addEventListener('click', function(e) {
+      e.stopPropagation();
+      archiveConversation(conv.id);
+    });
+    item.addEventListener('click', function() { openConversation(conv); });
+    conversationsList.appendChild(item);
+  });
+}
+
+// ===== MUTE =====
+function openMuteModal() { showModal('muteModal'); }
+
+async function muteConversation(duration) {
+  if (!currentConversation) return;
+  try {
+    await fetch('/api/chat/conversations/' + currentConversation.id + '/mute', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duration })
+    });
+    hideModal('muteModal');
+    await loadConversations();
+  } catch(e) { console.error(e); }
+}
+
+// ===== DISAPPEARING MESSAGES =====
+async function setDisappearingTimer(timer) {
+  if (!currentConversation) return;
+  try {
+    await fetch('/api/chat/conversations/' + currentConversation.id + '/disappearing', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timer })
+    });
+    currentConversation.disappearing_timer = timer;
+    socket.emit('disappearing_updated', {
+      conversation_id: currentConversation.id,
+      timer,
+      updated_by: currentUser.username
+    });
+  } catch(e) { console.error(e); }
+}
+
+// ===== POLLS =====
+function addPollOptionInput() {
+  var container = document.getElementById('pollOptionsContainer');
+  var count = container.querySelectorAll('.poll-option-input').length;
+  if (count >= 10) return;
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'poll-option-input';
+  input.placeholder = 'Option ' + (count + 1);
+  input.style.marginBottom = '8px';
+  container.appendChild(input);
+}
+
+async function createPoll() {
+  if (!currentConversation || currentConversation.type !== 'group') return;
+  var question = document.getElementById('pollQuestion').value.trim();
+  var optionInputs = document.querySelectorAll('#pollOptionsContainer .poll-option-input');
+  var options = [];
+  optionInputs.forEach(function(inp) { if (inp.value.trim()) options.push(inp.value.trim()); });
+  if (!question || options.length < 2) return;
+
+  var allowMultiple = document.getElementById('pollAllowMultiple').checked;
+  try {
+    var res = await fetch('/api/chat/conversations/' + currentConversation.id + '/polls', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, options, allow_multiple: allowMultiple })
+    });
+    var data = await res.json();
+    hideModal('pollModal');
+    // Send as socket message so everyone sees it in real-time
+    socket.emit('send_message', {
+      conversation_id: currentConversation.id,
+      content: String(data.poll_id),
+      type: 'poll'
+    });
+    // Reset form
+    document.getElementById('pollQuestion').value = '';
+    document.getElementById('pollOptionsContainer').innerHTML = '<input type="text" class="poll-option-input" placeholder="Option 1" style="margin-bottom:8px;"><input type="text" class="poll-option-input" placeholder="Option 2" style="margin-bottom:8px;">';
+    document.getElementById('pollAllowMultiple').checked = false;
+  } catch(e) { console.error(e); }
+}
+
+async function loadPollCard(pollId, container) {
+  if (!container) return;
+  try {
+    var res = await fetch('/api/chat/polls/' + pollId, { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    renderPollCard(data, container);
+  } catch(e) { container.innerHTML = '<em>Poll unavailable</em>'; }
+}
+
+function renderPollCard(data, container) {
+  var poll = data.poll, options = data.options, votes = data.votes;
+  var totalVotes = votes.length;
+  var html = '<div class="poll-question">&#128202; ' + escapeHtml(poll.question) + '</div>';
+  options.forEach(function(opt) {
+    var optVotes = votes.filter(v => v.option_id === opt.id);
+    var pct = totalVotes > 0 ? Math.round((optVotes.length / totalVotes) * 100) : 0;
+    var myVote = optVotes.some(v => v.user_id === currentUser.id);
+    html += '<div class="poll-option' + (myVote ? ' voted' : '') + '" data-option-id="' + opt.id + '" data-poll-id="' + poll.id + '">' +
+      '<div class="poll-option-bar" style="width:' + pct + '%;"></div>' +
+      '<span class="poll-option-text">' + escapeHtml(opt.option_text) + '</span>' +
+      '<span class="poll-option-count">' + optVotes.length + '</span></div>';
+  });
+  html += '<div class="poll-footer">' + totalVotes + ' vote' + (totalVotes !== 1 ? 's' : '') + '</div>';
+  container.innerHTML = html;
+
+  // Add click handlers
+  container.querySelectorAll('.poll-option').forEach(function(el) {
+    el.addEventListener('click', function() { votePoll(el.dataset.pollId, el.dataset.optionId, container); });
+  });
+}
+
+async function votePoll(pollId, optionId, container) {
+  try {
+    var res = await fetch('/api/chat/polls/' + pollId + '/vote', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ option_id: parseInt(optionId) })
+    });
+    var data = await res.json();
+    // Re-fetch full poll to re-render
+    var pollRes = await fetch('/api/chat/polls/' + pollId, { headers: { 'Authorization': 'Bearer ' + token } });
+    var pollData = await pollRes.json();
+    renderPollCard(pollData, container);
+    // Notify others
+    if (currentConversation) {
+      socket.emit('poll_vote', { conversation_id: currentConversation.id, poll_id: pollId, votes: data.votes });
+    }
+  } catch(e) { console.error(e); }
+}

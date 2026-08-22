@@ -158,6 +158,64 @@ router.put('/conversations/:id/lock', authenticateToken, async (req, res) => {
   res.json({ message: locked ? 'Locked' : 'Unlocked', locked: !!locked });
 });
 
+// Set disappearing messages timer
+router.put('/conversations/:id/disappearing', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const { timer } = req.body; // 0, 86400, 604800, 7776000
+  const validTimers = [0, 86400, 604800, 7776000];
+  if (!validTimers.includes(timer)) return res.status(400).json({ error: 'Invalid timer value' });
+
+  const conv = await query('SELECT type FROM conversations WHERE id = $1', [convId]);
+  if (conv.rows.length === 0) return res.status(404).json({ error: 'Conversation not found' });
+
+  // For groups, only admins
+  if (conv.rows[0].type === 'group') {
+    const member = await query('SELECT role FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+    if (member.rows.length === 0 || member.rows[0].role !== 'admin') return res.status(403).json({ error: 'Only admins can set disappearing timer' });
+  } else {
+    // For private, either member can set
+    const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+    if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+  }
+
+  await query('UPDATE conversations SET disappearing_timer = $1 WHERE id = $2', [timer, convId]);
+  res.json({ message: 'Timer updated', timer });
+});
+
+// Archive/Unarchive conversation
+router.put('/conversations/:id/archive', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const member = await query('SELECT archived FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+  const newVal = !member.rows[0].archived;
+  await query('UPDATE conversation_members SET archived = $1 WHERE conversation_id = $2 AND user_id = $3', [newVal, convId, req.user.id]);
+  res.json({ archived: newVal });
+});
+
+// Mute/Unmute conversation
+router.put('/conversations/:id/mute', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const { duration } = req.body; // '8h', '1w', 'forever', 'off'
+
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+  let mutedUntil = null;
+  if (duration === '8h') {
+    mutedUntil = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+  } else if (duration === '1w') {
+    mutedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  } else if (duration === 'forever') {
+    mutedUntil = new Date('2099-12-31').toISOString();
+  } else {
+    mutedUntil = null; // unmute
+  }
+
+  await query('UPDATE conversation_members SET muted_until = $1 WHERE conversation_id = $2 AND user_id = $3', [mutedUntil, convId, req.user.id]);
+  res.json({ muted_until: mutedUntil });
+});
+
 // Get group members
 router.get('/conversations/:id/members', authenticateToken, async (req, res) => {
   const result = await query(`
@@ -168,24 +226,25 @@ router.get('/conversations/:id/members', authenticateToken, async (req, res) => 
   res.json({ members: result.rows });
 });
 
-// Get conversations
+// Get conversations (with archived/muted info)
 router.get('/conversations', authenticateToken, async (req, res) => {
   const result = await query(`
     SELECT c.*,
+      cm.archived, cm.muted_until,
       CASE WHEN c.type = 'private' THEN (
-        SELECT u.username FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $1
+        SELECT u.username FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $1
       ) ELSE c.name END as display_name,
       CASE WHEN c.type = 'private' THEN (
-        SELECT u.avatar FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $2
+        SELECT u.avatar FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $2
       ) ELSE c.group_avatar END as display_avatar,
       CASE WHEN c.type = 'private' THEN (
-        SELECT u.chat_number FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $3
+        SELECT u.chat_number FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $3
       ) ELSE NULL END as display_chat_number,
       CASE WHEN c.type = 'private' THEN (
-        SELECT u.status FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $4
+        SELECT u.status FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $4
       ) ELSE NULL END as display_status,
       CASE WHEN c.type = 'private' THEN (
-        SELECT u.last_seen FROM users u JOIN conversation_members cm ON u.id = cm.user_id WHERE cm.conversation_id = c.id AND u.id != $5
+        SELECT u.last_seen FROM users u JOIN conversation_members cm2 ON u.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u.id != $5
       ) ELSE NULL END as display_last_seen,
       (SELECT content FROM messages WHERE conversation_id = c.id AND deleted = 0 ORDER BY created_at DESC LIMIT 1) as last_message,
       (SELECT type FROM messages WHERE conversation_id = c.id AND deleted = 0 ORDER BY created_at DESC LIMIT 1) as last_message_type,
@@ -194,8 +253,7 @@ router.get('/conversations', authenticateToken, async (req, res) => {
       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_id != $6 AND m.deleted = 0
        AND m.id NOT IN (SELECT message_id FROM read_receipts WHERE user_id = $7)) as unread_count
     FROM conversations c
-    JOIN conversation_members cm ON c.id = cm.conversation_id
-    WHERE cm.user_id = $8
+    JOIN conversation_members cm ON c.id = cm.conversation_id AND cm.user_id = $8
     ORDER BY last_message_time DESC NULLS LAST
   `, [req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id]);
   res.json({ conversations: result.rows });
@@ -228,14 +286,123 @@ router.get('/conversations/:id/messages', authenticateToken, async (req, res) =>
 
   let reactions = [];
   let receipts = [];
+  let starred = [];
   if (messageIds.length > 0) {
     const rResult = await query(`SELECT r.message_id, r.emoji, r.user_id, u.username FROM reactions r JOIN users u ON r.user_id = u.id WHERE r.message_id = ANY($1)`, [messageIds]);
     reactions = rResult.rows;
     const rrResult = await query(`SELECT rr.message_id, rr.user_id, u.username FROM read_receipts rr JOIN users u ON rr.user_id = u.id WHERE rr.message_id = ANY($1)`, [messageIds]);
     receipts = rrResult.rows;
+    const starResult = await query(`SELECT message_id FROM starred_messages WHERE user_id = $1 AND message_id = ANY($2)`, [req.user.id, messageIds]);
+    starred = starResult.rows.map(r => r.message_id);
   }
 
-  res.json({ messages: msgs, reactions, receipts });
+  res.json({ messages: msgs, reactions, receipts, starred });
+});
+
+// Star/Unstar message
+router.post('/messages/:id/star', authenticateToken, async (req, res) => {
+  const msgId = req.params.id;
+  const existing = await query('SELECT id FROM starred_messages WHERE user_id = $1 AND message_id = $2', [req.user.id, msgId]);
+  if (existing.rows.length > 0) {
+    await query('DELETE FROM starred_messages WHERE user_id = $1 AND message_id = $2', [req.user.id, msgId]);
+    res.json({ starred: false });
+  } else {
+    await query('INSERT INTO starred_messages (user_id, message_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.user.id, msgId]);
+    res.json({ starred: true });
+  }
+});
+
+// Get all starred messages
+router.get('/starred', authenticateToken, async (req, res) => {
+  const result = await query(`
+    SELECT m.*, u.username as sender_name, u.avatar as sender_avatar,
+      CASE WHEN c.type = 'private' THEN (
+        SELECT u2.username FROM users u2 JOIN conversation_members cm2 ON u2.id = cm2.user_id WHERE cm2.conversation_id = c.id AND u2.id != $1
+      ) ELSE c.name END as conversation_name
+    FROM starred_messages sm
+    JOIN messages m ON sm.message_id = m.id
+    JOIN users u ON m.sender_id = u.id
+    JOIN conversations c ON m.conversation_id = c.id
+    WHERE sm.user_id = $2 AND m.deleted = 0
+    ORDER BY sm.created_at DESC
+  `, [req.user.id, req.user.id]);
+  res.json({ messages: result.rows });
+});
+
+// Create poll
+router.post('/conversations/:id/polls', authenticateToken, async (req, res) => {
+  const convId = req.params.id;
+  const { question, options, allow_multiple } = req.body;
+
+  if (!question || !options || options.length < 2) return res.status(400).json({ error: 'Question and at least 2 options required' });
+
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+  const conv = await query('SELECT type FROM conversations WHERE id = $1', [convId]);
+  if (conv.rows[0].type !== 'group') return res.status(400).json({ error: 'Polls only in groups' });
+
+  const pollResult = await query(
+    'INSERT INTO polls (conversation_id, creator_id, question, allow_multiple) VALUES ($1, $2, $3, $4) RETURNING id',
+    [convId, req.user.id, question, allow_multiple || false]
+  );
+  const pollId = pollResult.rows[0].id;
+
+  for (let i = 0; i < options.length; i++) {
+    await query('INSERT INTO poll_options (poll_id, option_text, position) VALUES ($1, $2, $3)', [pollId, options[i], i]);
+  }
+
+  res.json({ poll_id: pollId });
+});
+
+// Get poll
+router.get('/polls/:id', authenticateToken, async (req, res) => {
+  const pollId = req.params.id;
+  const poll = await query('SELECT * FROM polls WHERE id = $1', [pollId]);
+  if (poll.rows.length === 0) return res.status(404).json({ error: 'Poll not found' });
+
+  const options = await query('SELECT * FROM poll_options WHERE poll_id = $1 ORDER BY position', [pollId]);
+  const votes = await query(`
+    SELECT pv.option_id, pv.user_id, u.username
+    FROM poll_votes pv JOIN users u ON pv.user_id = u.id
+    WHERE pv.poll_id = $1
+  `, [pollId]);
+
+  res.json({ poll: poll.rows[0], options: options.rows, votes: votes.rows });
+});
+
+// Vote on poll
+router.post('/polls/:id/vote', authenticateToken, async (req, res) => {
+  const pollId = req.params.id;
+  const { option_id } = req.body;
+
+  const poll = await query('SELECT * FROM polls WHERE id = $1', [pollId]);
+  if (poll.rows.length === 0) return res.status(404).json({ error: 'Poll not found' });
+
+  // Check membership
+  const member = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [poll.rows[0].conversation_id, req.user.id]);
+  if (member.rows.length === 0) return res.status(403).json({ error: 'Not a member' });
+
+  if (!poll.rows[0].allow_multiple) {
+    // Remove previous votes
+    await query('DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2', [pollId, req.user.id]);
+  }
+
+  // Toggle vote - if already voted for this option, remove it
+  const existing = await query('SELECT id FROM poll_votes WHERE poll_id = $1 AND option_id = $2 AND user_id = $3', [pollId, option_id, req.user.id]);
+  if (existing.rows.length > 0) {
+    await query('DELETE FROM poll_votes WHERE poll_id = $1 AND option_id = $2 AND user_id = $3', [pollId, option_id, req.user.id]);
+  } else {
+    await query('INSERT INTO poll_votes (poll_id, option_id, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [pollId, option_id, req.user.id]);
+  }
+
+  // Return updated votes
+  const votes = await query(`
+    SELECT pv.option_id, pv.user_id, u.username
+    FROM poll_votes pv JOIN users u ON pv.user_id = u.id
+    WHERE pv.poll_id = $1
+  `, [pollId]);
+  res.json({ votes: votes.rows });
 });
 
 // Search messages

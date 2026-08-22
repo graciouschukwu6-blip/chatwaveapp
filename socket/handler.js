@@ -2,6 +2,31 @@ const { query } = require('../database');
 
 const onlineUsers = new Map();
 
+// Fetch link preview metadata
+async function fetchLinkPreview(url) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'ChatWaveBot/1.0' }
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const html = await res.text();
+    const getMetaContent = (property) => {
+      const match = html.match(new RegExp(`<meta[^>]*(?:property|name)=["']${property}["'][^>]*content=["']([^"']*)["']`, 'i'))
+        || html.match(new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${property}["']`, 'i'));
+      return match ? match[1] : null;
+    };
+    const title = getMetaContent('og:title') || getMetaContent('twitter:title') || (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || '';
+    const description = getMetaContent('og:description') || getMetaContent('twitter:description') || getMetaContent('description') || '';
+    const image = getMetaContent('og:image') || getMetaContent('twitter:image') || '';
+    if (!title && !description) return null;
+    return { url, title: title.substring(0, 100), description: description.substring(0, 200), image };
+  } catch(e) { return null; }
+}
+
 function setupSocket(io) {
   io.on('connection', async (socket) => {
     const user = socket.user;
@@ -24,7 +49,7 @@ function setupSocket(io) {
         const memberCheck = await query('SELECT id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [conversation_id, user.id]);
         if (memberCheck.rows.length === 0) return;
 
-        const convResult = await query('SELECT type, locked FROM conversations WHERE id = $1', [conversation_id]);
+        const convResult = await query('SELECT type, locked, disappearing_timer FROM conversations WHERE id = $1', [conversation_id]);
         const conv = convResult.rows[0];
 
         // Check if group is locked
@@ -57,9 +82,24 @@ function setupSocket(io) {
           }
         }
 
+        // Calculate expiry for disappearing messages
+        let expiresAt = null;
+        if (conv && conv.disappearing_timer > 0) {
+          expiresAt = new Date(Date.now() + conv.disappearing_timer * 1000).toISOString();
+        }
+
+        // Detect URLs for link preview
+        let linkPreview = null;
+        if (type === 'text' && content) {
+          const urlMatch = content.match(/https?:\/\/[^\s<]+/);
+          if (urlMatch) {
+            linkPreview = await fetchLinkPreview(urlMatch[0]);
+          }
+        }
+
         const insertResult = await query(
-          'INSERT INTO messages (conversation_id, sender_id, content, type, file_url, file_name, reply_to, view_once) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-          [conversation_id, user.id, content, type, file_url || null, file_name || null, reply_to || null, view_once ? 1 : 0]
+          'INSERT INTO messages (conversation_id, sender_id, content, type, file_url, file_name, reply_to, view_once, expires_at, link_preview) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id',
+          [conversation_id, user.id, content, type, file_url || null, file_name || null, reply_to || null, view_once ? 1 : 0, expiresAt, linkPreview ? JSON.stringify(linkPreview) : null]
         );
 
         // Get reply info
@@ -89,6 +129,8 @@ function setupSocket(io) {
           forwarded_from: null,
           view_once: view_once ? 1 : 0,
           deleted: 0,
+          expires_at: expiresAt,
+          link_preview: linkPreview,
           created_at: new Date().toISOString()
         };
 
@@ -145,6 +187,18 @@ function setupSocket(io) {
           io.to('conv_' + convId).emit('new_message', forwarded);
         }
       } catch (err) { console.error('forward_message error:', err); }
+    });
+
+    // Poll vote (real-time update)
+    socket.on('poll_vote', (data) => {
+      const { conversation_id, poll_id, votes } = data;
+      io.to('conv_' + conversation_id).emit('poll_updated', { poll_id, votes });
+    });
+
+    // Disappearing timer updated
+    socket.on('disappearing_updated', (data) => {
+      const { conversation_id, timer, updated_by } = data;
+      io.to('conv_' + conversation_id).emit('disappearing_updated', { conversation_id, timer, updated_by });
     });
 
     // Typing

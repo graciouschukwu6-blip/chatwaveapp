@@ -5,7 +5,7 @@ const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
-const { initDb } = require('./database');
+const { initDb, cleanupExpiredMessages } = require('./database');
 const { authenticateSocket } = require('./middleware/auth');
 const { setupSocket } = require('./socket/handler');
 
@@ -56,6 +56,10 @@ initDb().then(() => {
   server.listen(PORT, () => {
     console.log('ChatWave running on http://localhost:' + PORT);
   });
+
+  // Cleanup expired disappearing messages every 5 minutes
+  cleanupExpiredMessages();
+  setInterval(cleanupExpiredMessages, 5 * 60 * 1000);
 }).catch(err => {
   console.error('Failed to initialize database:', err);
   process.exit(1);

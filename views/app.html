@@ -21,6 +21,7 @@
         <div class="sidebar-actions">
           <button class="icon-btn" id="themeToggle" title="Toggle Theme">&#9789;</button>
           <button class="icon-btn" id="statusBtn" title="Status">&#9679;</button>
+          <button class="icon-btn" id="starredBtn" title="Starred Messages">&#11088;</button>
           <button class="icon-btn" id="searchMsgsBtn" title="Search Messages">&#128269;</button>
           <button class="icon-btn" id="newChatBtn" title="New Chat">+</button>
           <button class="icon-btn" id="logoutBtn" title="Logout">&#10005;</button>
@@ -89,6 +90,7 @@
 
         <div class="message-input-area">
           <button class="icon-btn attach-btn" id="attachBtn" title="Attach file">&#128206;</button>
+          <button class="icon-btn poll-btn" id="pollBtn" title="Create poll">&#128202;</button>
           <button class="icon-btn view-once-toggle" id="viewOnceToggle" title="Toggle view once">&#9865;</button>
           <button class="icon-btn voice-btn" id="voiceBtn" title="Voice note">&#127908;</button>
           <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off">
@@ -248,6 +250,7 @@
   <div class="context-menu" id="contextMenu" style="display:none;">
     <button class="ctx-btn" data-action="reply">&#8617; Reply</button>
     <button class="ctx-btn" data-action="react">&#128522; React</button>
+    <button class="ctx-btn" data-action="star">&#11088; Star</button>
     <button class="ctx-btn" data-action="edit">&#9998; Edit</button>
     <button class="ctx-btn" data-action="forward">&#8618; Forward</button>
     <button class="ctx-btn" data-action="pin">&#128204; Pin</button>
@@ -336,6 +339,56 @@
         <button class="close-modal" id="closeViewersPanel">&#10005;</button>
       </div>
       <div class="status-viewers-list" id="statusViewersList"></div>
+    </div>
+  </div>
+
+  <!-- Starred Messages Modal -->
+  <div class="modal" id="starredModal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>&#11088; Starred Messages</h3>
+        <button class="close-modal" id="closeStarred">&#10005;</button>
+      </div>
+      <div class="starred-list" id="starredList"></div>
+    </div>
+  </div>
+
+  <!-- Poll Create Modal -->
+  <div class="modal" id="pollModal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>&#128202; Create Poll</h3>
+        <button class="close-modal" id="closePoll">&#10005;</button>
+      </div>
+      <div class="input-group">
+        <label>Question</label>
+        <input type="text" id="pollQuestion" placeholder="Ask a question...">
+      </div>
+      <div class="input-group">
+        <label>Options</label>
+        <div id="pollOptionsContainer">
+          <input type="text" class="poll-option-input" placeholder="Option 1" style="margin-bottom:8px;">
+          <input type="text" class="poll-option-input" placeholder="Option 2" style="margin-bottom:8px;">
+        </div>
+        <button class="btn-add-option" id="addPollOption" style="background:none;border:1px dashed var(--border);border-radius:8px;padding:8px;width:100%;color:var(--accent);cursor:pointer;font-size:13px;margin-top:4px;">+ Add option</button>
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:13px;display:flex;align-items:center;gap:8px;color:var(--text-secondary);cursor:pointer;">
+          <input type="checkbox" id="pollAllowMultiple"> Allow multiple answers
+        </label>
+      </div>
+      <button class="btn-primary" id="createPollBtn">Create Poll</button>
+    </div>
+  </div>
+
+  <!-- Mute Modal -->
+  <div class="modal" id="muteModal" style="display:none;">
+    <div class="modal-content modal-sm">
+      <div class="modal-header"><h3>&#128263; Mute notifications</h3><button class="close-modal" id="closeMute">&#10005;</button></div>
+      <button class="btn-primary mute-option" data-duration="8h" style="margin-bottom:8px;">Mute for 8 hours</button>
+      <button class="btn-primary mute-option" data-duration="1w" style="margin-bottom:8px;">Mute for 1 week</button>
+      <button class="btn-primary mute-option" data-duration="forever" style="margin-bottom:8px;">Mute always</button>
+      <button class="btn-danger mute-option" data-duration="off">Unmute</button>
     </div>
   </div>
 
