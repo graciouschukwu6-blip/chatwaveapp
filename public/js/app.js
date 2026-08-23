@@ -3400,7 +3400,12 @@ var callState = {
   ringOscillator: null
 };
 
-var iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+var iceServers = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+];
 
 // Start a call
 async function initiateCall(type) {
@@ -3568,6 +3573,7 @@ function cleanupCall() {
   document.getElementById('localVideo').style.display = 'none';
   document.getElementById('remoteVideo').srcObject = null;
   document.getElementById('localVideo').srcObject = null;
+  document.getElementById('remoteAudio').srcObject = null;
 
   resetCallState();
 }
@@ -3619,14 +3625,18 @@ function createPeerConnection() {
 
   // Remote stream
   pc.ontrack = function(e) {
+    callState.remoteStream = e.streams[0];
+
+    // Always play audio through the hidden audio element
+    var remoteAudio = document.getElementById('remoteAudio');
+    remoteAudio.srcObject = e.streams[0];
+
     if (callState.type === 'video') {
       var remoteVideo = document.getElementById('remoteVideo');
       remoteVideo.srcObject = e.streams[0];
       remoteVideo.style.display = 'block';
       document.getElementById('callVoiceView').style.display = 'none';
     }
-    callState.remoteStream = e.streams[0];
-    // Connected — start timer
     startCallTimer();
   };
 
